@@ -1,0 +1,10 @@
+{
+    "receiver": {
+        "listen_port": 12345,
+        "width": 828,
+        "height": 280,
+        "fullscreen": false,
+        "vsync": true,
+        "scale": 1.0
+    }
+}

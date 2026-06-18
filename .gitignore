@@ -1,0 +1,38 @@
+# --- Build artifacts ---
+obj/
+# Keep bin/data (runtime assets), drop everything else generated into bin/
+# (including the macOS .app bundle build product)
+bin/*
+!bin/data/
+
+# Common shared libs that get copied into bin/ at build time
+# (these come from the openFrameworks distribution, not from this repo)
+*.so
+*.so.*
+*.dll
+*.dylib
+
+# Build product names (defensive, in case the binary is dropped at repo root)
+/omnivisu_receiver
+/omnivisu_receiver_debug
+*.app/
+
+# --- Editor / OS ---
+.DS_Store
+._*
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vs/
+*.user
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+
+# --- Misc ---
+*.log
+core
+core.*
