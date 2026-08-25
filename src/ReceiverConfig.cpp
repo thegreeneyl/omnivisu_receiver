@@ -31,6 +31,8 @@ bool ReceiverConfig::load(const std::string & path) {
 		fullscreen = r.value("fullscreen", fullscreen);
 		vsync = r.value("vsync", vsync);
 		scale = r.value("scale", scale);
+		applyFade = r.value("apply_fade", applyFade);
+		mouthBand = r.value("mouth_band", mouthBand);
 	}
 
 	loaded = true;

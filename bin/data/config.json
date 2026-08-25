@@ -5,6 +5,8 @@
         "height": 280,
         "fullscreen": false,
         "vsync": true,
-        "scale": 1.0
+        "scale": 1.0,
+        "apply_fade": true,
+        "mouth_band": 36
     }
 }

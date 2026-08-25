@@ -20,6 +20,12 @@ public:
 	bool getFullscreen() const { return fullscreen; }
 	bool getVsync() const { return vsync; }
 	float getScale() const { return scale; }
+	/// Initial state of applying the received fade to the rendered image
+	/// (toggled at runtime with 'a'). The fade value itself is always shown
+	/// in the info bar regardless.
+	bool getApplyFade() const { return applyFade; }
+	/// Height in pixels of the mouth strip band below the eyes.
+	int getMouthBand() const { return mouthBand; }
 
 private:
 	int listenPort = 12345;
@@ -28,5 +34,7 @@ private:
 	bool fullscreen = false;
 	bool vsync = true;
 	float scale = 1.0f;
+	bool applyFade = true;
+	int mouthBand = 36;
 	bool loaded = false;
 };

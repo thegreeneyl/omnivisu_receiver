@@ -65,6 +65,17 @@ bool EyeStreamReceiver::getLatestFrame(ofPixels & out) {
 }
 
 //--------------------------------------------------------------
+bool EyeStreamReceiver::getLatestState(float & fade, ofPixels & lights) {
+	std::lock_guard<std::mutex> lk(frameMutex);
+	if (!haveState) {
+		return false;
+	}
+	fade = latestStateFade;
+	lights = latestStateLights;
+	return true;
+}
+
+//--------------------------------------------------------------
 void EyeStreamReceiver::threadedFunction() {
 	std::vector<char> recvBuf(kRecvBufferBytes);
 
@@ -89,19 +100,82 @@ void EyeStreamReceiver::threadedFunction() {
 	bool haveSession = false;
 	std::uint32_t curSessionId = 0;
 
+	// Mouth/fade state ordering, tracked separately from the video frames
+	// (the state has its own sequence counter but shares the sessionId).
+	bool haveStateSession = false;
+	std::uint32_t stateSessionId = 0;
+	bool haveStateSeq = false;
+	std::uint32_t lastStateSeq = 0;
+
 	ofPixels jpegPixels;
 
 	while (running) {
 		const int n = udp.Receive(recvBuf.data(), static_cast<int>(recvBuf.size()));
-		if (n < eyestream::kHeaderBytes) {
+		if (n < static_cast<int>(sizeof(std::uint32_t))) {
 			continue; // timeout (<0), empty, or runt packet
+		}
+
+		// Demux on the magic BEFORE the video-header size gate: the state
+		// datagram (22-byte header + tiny payload) can be shorter than a
+		// video PacketHeader.
+		std::uint32_t magic = 0;
+		std::memcpy(&magic, recvBuf.data(), sizeof(magic));
+
+		if (magic == eyestream::kStateMagic) {
+			if (n < eyestream::kStateHeaderBytes) {
+				continue;
+			}
+			eyestream::StatePacket sp;
+			std::memcpy(&sp, recvBuf.data(), eyestream::kStateHeaderBytes);
+			const int lightCount = static_cast<int>(sp.lightsW) * sp.lightsH;
+			if (lightCount > eyestream::kMaxStateLights) {
+				continue;
+			}
+			const int expectedPayload = lightCount * sp.channels;
+			if (n != eyestream::kStateHeaderBytes + expectedPayload) {
+				continue;
+			}
+			// New sender run: its sequence restarts at 0, so drop ordering
+			// state (same rationale as the video sessionId reset below).
+			if (!haveStateSession || sp.sessionId != stateSessionId) {
+				haveStateSession = true;
+				stateSessionId = sp.sessionId;
+				haveStateSeq = false;
+			}
+			if (haveStateSeq
+				&& static_cast<std::int32_t>(sp.sequence - lastStateSeq) <= 0) {
+				continue; // reordered/duplicate datagram: keep the newer state
+			}
+			haveStateSeq = true;
+			lastStateSeq = sp.sequence;
+
+			{
+				std::lock_guard<std::mutex> lk(frameMutex);
+				latestStateFade = std::min(1.0f, std::max(0.0f, sp.fade));
+				if (lightCount > 0 && (sp.channels == 3 || sp.channels == 4)) {
+					latestStateLights.setFromPixels(
+						reinterpret_cast<const unsigned char *>(
+							recvBuf.data() + eyestream::kStateHeaderBytes),
+						sp.lightsW, sp.lightsH,
+						sp.channels == 4 ? OF_PIXELS_RGBA : OF_PIXELS_RGB);
+				} else {
+					latestStateLights.clear();
+				}
+				haveState = true;
+			}
+			stateCount.fetch_add(1);
+			continue;
+		}
+
+		if (magic != eyestream::kMagic) {
+			continue;
+		}
+		if (n < eyestream::kHeaderBytes) {
+			continue;
 		}
 
 		eyestream::PacketHeader h;
 		std::memcpy(&h, recvBuf.data(), eyestream::kHeaderBytes);
-		if (h.magic != eyestream::kMagic) {
-			continue;
-		}
 		if (n != eyestream::kHeaderBytes + static_cast<int>(h.payloadBytes)) {
 			continue;
 		}

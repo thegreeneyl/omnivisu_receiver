@@ -17,11 +17,25 @@
 /// so the receiver MUST key its newest-frame-wins ordering on sessionId and
 /// reset all reassembly state whenever the sessionId changes; otherwise a
 /// restarted sender's low frameIds look "stale" and get dropped forever.
+///
+/// Besides the video packets there is a second, independent packet type on the
+/// SAME port: the mouth/fade state packet (magic "MOUT", StatePacket below).
+/// It is one small datagram (no fragmentation, no reassembly), sent every
+/// sender frame - including while the video stream is gated off at fade 0 -
+/// and consumed latest-wins keyed on (sessionId, sequence). Fire-and-forget:
+/// if either end disappears the other just keeps its last state and picks up
+/// again as soon as datagrams flow.
 namespace eyestream {
 
 constexpr std::uint32_t kMagic = 0x45594553; // "EYES"
 constexpr std::uint8_t kFormatRawRgb = 0;
 constexpr std::uint8_t kFormatJpeg = 1;
+
+/// Magic of the mouth/fade state datagram ("MOUT").
+constexpr std::uint32_t kStateMagic = 0x4D4F5554;
+/// Sanity cap on lightsW * lightsH so a corrupt packet can't ask for huge
+/// buffers (the real grid is 14x1 today).
+constexpr int kMaxStateLights = 64;
 
 #pragma pack(push, 1)
 struct PacketHeader {
@@ -37,8 +51,24 @@ struct PacketHeader {
 	std::uint16_t payloadBytes = 0;
 	std::uint8_t format = kFormatRawRgb;
 };
+
+/// Header of the mouth/fade state datagram. Immediately followed by
+/// lightsW * lightsH * channels bytes of light-grid pixels (row-major, the
+/// CPU readback of the mouth's lights FBO). lightsW may be 0 when the sender
+/// has no mouth loaded; the fade value is still valid then.
+struct StatePacket {
+	std::uint32_t magic = kStateMagic;
+	std::uint32_t sessionId = 0; ///< Same id as the video stream of this run.
+	std::uint32_t sequence = 0;  ///< Monotonic per session; wrapping compare.
+	float fade = 0.0f;           ///< Shaped presence fade, 0..1.
+	std::uint8_t lightsW = 0;
+	std::uint8_t lightsH = 0;
+	std::uint8_t channels = 0; ///< Bytes per light (4 = RGBA).
+	std::uint8_t reserved[3] = {0, 0, 0};
+};
 #pragma pack(pop)
 
 constexpr int kHeaderBytes = static_cast<int>(sizeof(PacketHeader));
+constexpr int kStateHeaderBytes = static_cast<int>(sizeof(StatePacket));
 
 } // namespace eyestream
