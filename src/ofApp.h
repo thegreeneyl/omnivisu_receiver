@@ -6,6 +6,11 @@
 
 class ofApp : public ofBaseApp {
 public:
+	/// The config is loaded in main() (the window mode must be known before
+	/// the window exists) and handed in here.
+	explicit ofApp(ReceiverConfig cfg)
+		: config(std::move(cfg)) { }
+
 	void setup() override;
 	void update() override;
 	void draw() override;
@@ -16,6 +21,12 @@ public:
 private:
 	ReceiverConfig config;
 	EyeStreamReceiver receiver;
+
+	// Content is drawn anchored to the window's upper-left corner (the LED
+	// controller samples the upper-left corner of the screen). The scale
+	// factor only shrinks the layout for development in windowed mode; in
+	// fullscreen/borderless it is forced to 1 so the LED pixels are exact.
+	float drawScale = 1.0f;
 
 	ofTexture frameTex;
 	ofPixels framePixels;

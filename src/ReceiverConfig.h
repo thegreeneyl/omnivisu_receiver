@@ -8,6 +8,14 @@
 /// canvas dimensions (two eyes side-by-side), and window/display options.
 class ReceiverConfig {
 public:
+	/// How the app window is created. The LED controller samples the
+	/// upper-left corner of the screen, so content is always anchored there.
+	/// - Windowed: normal decorated window (development).
+	/// - Borderless: undecorated window pinned at (0,0). NOTE: macOS keeps
+	///   the menu bar above normal windows; needs "auto-hide menu bar".
+	/// - Fullscreen: true fullscreen, hides menu bar and dock (installation).
+	enum class WindowMode { Windowed, Borderless, Fullscreen };
+
 	/// Parses the given config file. Returns false (and logs) if the file is
 	/// missing or unparseable; in that case getters return their defaults.
 	bool load(const std::string & path);
@@ -17,7 +25,9 @@ public:
 	int getListenPort() const { return listenPort; }
 	int getWidth() const { return width; }
 	int getHeight() const { return height; }
-	bool getFullscreen() const { return fullscreen; }
+	WindowMode getWindowMode() const { return windowMode; }
+	/// Monitor index for fullscreen (multi-display setups).
+	int getDisplay() const { return display; }
 	bool getVsync() const { return vsync; }
 	float getScale() const { return scale; }
 	/// Initial state of applying the received fade to the rendered image
@@ -40,7 +50,8 @@ private:
 	int listenPort = 12345;
 	int width = 828;
 	int height = 280;
-	bool fullscreen = false;
+	WindowMode windowMode = WindowMode::Windowed;
+	int display = 0;
 	bool vsync = true;
 	float scale = 1.0f;
 	bool applyFade = true;

@@ -1,5 +1,7 @@
 #include "ofApp.h"
 
+#include "ofAppGLFWWindow.h"
+
 #include <algorithm>
 #include <sstream>
 
@@ -8,18 +10,32 @@ void ofApp::setup() {
 	ofSetWindowTitle("omnivisu receiver");
 	ofBackground(0);
 
-	config.load("config.json");
-
+	// Window mode/size/position were applied at creation in main(). Here we
+	// only derive the draw scale and installation niceties.
 	ofSetVerticalSync(config.getVsync());
-	if (config.getFullscreen()) {
-		ofSetFullscreen(true);
+	const auto mode = config.getWindowMode();
+	if (mode == ReceiverConfig::WindowMode::Windowed) {
+		drawScale = std::max(0.05f, config.getScale());
 	} else {
-		// Extra band below the eyes for the mouth strip so it never covers
-		// the video canvas.
-		const int w = static_cast<int>(config.getWidth() * config.getScale());
-		const int h = static_cast<int>(config.getHeight() * config.getScale())
-			+ config.getMouthBand();
-		ofSetWindowShape(w, h);
+		drawScale = 1.0f;
+		ofHideCursor();
+		if (mode == ReceiverConfig::WindowMode::Borderless) {
+			// GLFW may have nudged the undecorated window; re-pin the origin.
+			ofSetWindowPosition(0, 0);
+		}
+	}
+
+	// The LED controller samples physical pixels; on a Retina/scaled display
+	// one OF unit is more than one pixel and the corner region would come out
+	// wrong. Run the output display at a non-scaled resolution.
+	if (auto * glfw = dynamic_cast<ofAppGLFWWindow *>(ofGetWindowPtr())) {
+		const int pixelScale = glfw->getPixelScreenCoordScale();
+		if (pixelScale != 1) {
+			ofLogWarning("omnivisu_receiver")
+				<< "display pixel scale is " << pixelScale
+				<< "x (Retina/scaled mode): the LED corner region will not be "
+				<< "pixel-exact - switch the display to a non-scaled resolution";
+		}
 	}
 
 	applyFade = config.getApplyFade();
@@ -135,18 +151,18 @@ void ofApp::update() {
 void ofApp::draw() {
 	ofClear(0, 255);
 
-	const float winW = static_cast<float>(ofGetWidth());
+	// Content is anchored to the upper-left corner at its configured pixel
+	// size (times drawScale in windowed dev mode): the LED controller samples
+	// the corner of the screen, so the canvas must never move or stretch with
+	// the window. The mouth strip band sits directly below the canvas.
 	const float winH = static_cast<float>(ofGetHeight());
-	// Bottom band reserved for the mouth strip; the eyes fill the rest. In
-	// fullscreen the band is simply pinned to the bottom edge.
-	const float bandH = std::min(static_cast<float>(config.getMouthBand()), winH);
-	const float eyesH = winH - bandH;
+	const float canvasW = config.getWidth() * drawScale;
+	const float canvasH = config.getHeight() * drawScale;
+	const float bandH = static_cast<float>(config.getMouthBand());
 
 	if (hasFrame && frameTex.isAllocated()) {
 		ofSetColor(255);
-		// Fill the eyes region; the window is sized to the canvas plus the
-		// mouth band, so this preserves the side-by-side eye layout.
-		frameTex.draw(0, 0, winW, eyesH);
+		frameTex.draw(0, 0, canvasW, canvasH);
 	}
 
 	// Mouth strip below the eyes: the sender's LED grid upscaled
@@ -154,8 +170,8 @@ void ofApp::draw() {
 	if (bandH > 0.0f && lightsTex.isAllocated() && lightsTex.getWidth() > 0) {
 		const float pad = 4.0f;
 		const float stripX = pad;
-		const float stripY = eyesH + pad;
-		const float stripW = winW - 2.0f * pad;
+		const float stripY = canvasH + pad;
+		const float stripW = canvasW - 2.0f * pad;
 		const float stripH = std::max(1.0f, bandH - 2.0f * pad);
 		const int cells = static_cast<int>(lightsTex.getWidth());
 
@@ -189,7 +205,7 @@ void ofApp::draw() {
 		ofEnableAlphaBlending();
 		ofFill();
 		ofSetColor(0, 0, 0, static_cast<int>((1.0f - effectiveFade) * 255.0f));
-		ofDrawRectangle(0.0f, 0.0f, winW, winH);
+		ofDrawRectangle(0.0f, 0.0f, canvasW, canvasH + bandH);
 		ofPopStyle();
 	}
 
