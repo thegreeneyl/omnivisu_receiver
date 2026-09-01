@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ofMain.h"
+#include "ofxGui.h"
 #include "ReceiverConfig.h"
 #include "EyeStreamReceiver.h"
 
@@ -62,6 +63,37 @@ private:
 	float lastStateTime = -1.0f;
 	float lastVideoTime = -1.0f;
 	bool streamAlive = false;
+
+	// --- color grading of the final LED output ---
+	// The doubled eye canvas is rendered into ledFbo at full LED resolution
+	// and drawn to screen through the grade shader (same controls and shader
+	// as the sender, so grading.json files are interchangeable). The fade
+	// overlay is applied AFTER grading: a brightness lift must never turn
+	// "faded to black" into gray on the building.
+	ofParameterGroup gradingGroup{ "grading" };
+	ofParameter<bool> enableGrading{ "enable grading", true };
+	ofParameter<float> gradeExposure{ "exposure (stops)", 0.0f, -2.0f, 2.0f };
+	ofParameter<float> gradeBrightness{ "brightness", 0.0f, -0.5f, 0.5f };
+	ofParameter<float> gradeContrast{ "contrast", 1.0f, 0.0f, 2.0f };
+	ofParameter<float> gradeGamma{ "gamma", 1.0f, 0.3f, 3.0f };
+	ofParameter<float> gradeSaturation{ "saturation", 1.0f, 0.0f, 2.0f };
+	ofxPanel gradingPanel;
+	ofFbo ledFbo;
+	ofShader gradeShader;
+	bool gradeShaderLoaded = false;
+	bool gradeShaderUsesRect = false;
+
+	// Window mode chosen at startup; config reloads ('r') can't change it.
+	ReceiverConfig::WindowMode activeWindowMode = ReceiverConfig::WindowMode::Windowed;
+
+	bool buildGradeShader(bool useRect);
+	void allocateLedFbo();
+	bool loadGradingParams();
+	bool saveGradingParams();
+	/// Re-reads config.json for the runtime-safe values (fades, timeout,
+	/// apply_fade, scale, LED size, vsync) and reloads grading.json. Window
+	/// mode and listen port need a restart and are logged if changed.
+	void reloadRuntimeConfig();
 
 	// Local link fade [0..1]: ramps toward 1 while the stream is alive,
 	// toward 0 when it disappears, so a frozen last frame fades out

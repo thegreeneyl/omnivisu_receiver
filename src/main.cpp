@@ -14,10 +14,11 @@ int main() {
 	settings.setGLVersion(3, 3);
 
 	// Windowed size: the LED area (scaled for small dev screens) plus the UI
-	// band below it (mouth strip + info text; matches ofApp::draw layout).
+	// band below it (mouth strip, info text and grading panel; matches
+	// ofApp::draw layout).
 	const int w = static_cast<int>(config.getLedWidth() * config.getScale());
 	const int h = static_cast<int>(config.getLedHeight() * config.getScale())
-		+ config.getMouthBand() + 72;
+		+ config.getMouthBand() + 200;
 
 	switch (config.getWindowMode()) {
 	case ReceiverConfig::WindowMode::Fullscreen:

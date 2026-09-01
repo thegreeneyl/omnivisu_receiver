@@ -1,0 +1,10 @@
+{
+    "grading": {
+        "brightness": "0",
+        "contrast": "1",
+        "enable_grading": "1",
+        "exposure__stops_": "0",
+        "gamma": "1",
+        "saturation": "1"
+    }
+}
