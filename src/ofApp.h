@@ -40,4 +40,24 @@ private:
 	std::uint64_t lastRecvCount = 0;
 	float lastRecvSampleTime = 0.0f;
 	float receivedFps = 0.0f;
+
+	// Stream-liveness tracking. State packets are the heartbeat: the sender
+	// keeps sending them even while the video is gated off at fade 0, so
+	// their absence (not the video's) means "sender is gone". A video stall
+	// while the reported fade is up is treated as gone too (safety net for
+	// one-way packet loss).
+	std::uint64_t prevStateCount = 0;
+	std::uint64_t prevFrameCount = 0;
+	float lastStateTime = -1.0f;
+	float lastVideoTime = -1.0f;
+	bool streamAlive = false;
+
+	// Local link fade [0..1]: ramps toward 1 while the stream is alive,
+	// toward 0 when it disappears, so a frozen last frame fades out
+	// gracefully and a returning stream fades back in. Combined with the
+	// received fade by multiplication (effective = link * remote), which
+	// resolves every constellation without special cases: a stale remote
+	// value gets ramped down by the link fade, and a returning sender never
+	// snaps in even if its own fade is already at 1.
+	float linkFade = 0.0f;
 };

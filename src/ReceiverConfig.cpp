@@ -33,6 +33,9 @@ bool ReceiverConfig::load(const std::string & path) {
 		scale = r.value("scale", scale);
 		applyFade = r.value("apply_fade", applyFade);
 		mouthBand = r.value("mouth_band", mouthBand);
+		streamTimeoutSeconds = r.value("stream_timeout_seconds", streamTimeoutSeconds);
+		fadeInSeconds = r.value("fade_in_seconds", fadeInSeconds);
+		fadeOutSeconds = r.value("fade_out_seconds", fadeOutSeconds);
 	}
 
 	loaded = true;

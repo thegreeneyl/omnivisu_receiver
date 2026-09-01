@@ -79,6 +79,44 @@ void ofApp::update() {
 		lastRecvSampleTime = now;
 	}
 
+	// Liveness: timestamp packet arrivals via the receiver's counters. State
+	// packets are the heartbeat (they keep flowing while the video is gated
+	// off at fade 0); a video stall while the reported fade is up counts as
+	// dead too, so a one-way packet-loss anomaly can't freeze the image.
+	const std::uint64_t stateCountNow = receiver.getStateCount();
+	if (stateCountNow != prevStateCount) {
+		prevStateCount = stateCountNow;
+		lastStateTime = now;
+	}
+	if (count != prevFrameCount) {
+		prevFrameCount = count;
+		lastVideoTime = now;
+	}
+
+	const float timeout = std::max(0.1f, config.getStreamTimeoutSeconds());
+	bool alive = lastStateTime >= 0.0f && (now - lastStateTime) < timeout;
+	if (alive && hasState && stateFade > 0.05f
+		&& (lastVideoTime < 0.0f || now - lastVideoTime > timeout)) {
+		alive = false;
+	}
+	if (alive != streamAlive) {
+		streamAlive = alive;
+		ofLogNotice("omnivisu_receiver")
+			<< "stream " << (streamAlive ? "alive" : "lost")
+			<< " (fading " << (streamAlive ? "in" : "out") << ")";
+	}
+
+	// Ramp the local link fade toward the liveness target. dt is clamped so a
+	// long hitch (window drag, debugger pause) can't jump the fade.
+	const float dt = std::min(0.1f, static_cast<float>(ofGetLastFrameTime()));
+	if (streamAlive) {
+		const float fadeIn = config.getFadeInSeconds();
+		linkFade = (fadeIn > 1e-4f) ? std::min(1.0f, linkFade + dt / fadeIn) : 1.0f;
+	} else {
+		const float fadeOut = config.getFadeOutSeconds();
+		linkFade = (fadeOut > 1e-4f) ? std::max(0.0f, linkFade - dt / fadeOut) : 0.0f;
+	}
+
 	if (now - lastLogTime >= 2.0f) {
 		ofLogNotice("omnivisu_receiver") << "render_fps=" << ofToString(ofGetFrameRate(), 1)
 			<< " recv_fps=" << ofToString(receivedFps, 1)
@@ -86,7 +124,9 @@ void ofApp::update() {
 			<< " dropped=" << receiver.getDroppedCount()
 			<< " states=" << receiver.getStateCount()
 			<< " fade=" << ofToString(stateFade, 2)
-			<< (applyFade ? "" : " (not applied)");
+			<< (applyFade ? "" : " (not applied)")
+			<< " link=" << ofToString(linkFade, 2)
+			<< (streamAlive ? "" : " (stream lost)");
 		lastLogTime = now;
 	}
 }
@@ -107,10 +147,6 @@ void ofApp::draw() {
 		// Fill the eyes region; the window is sized to the canvas plus the
 		// mouth band, so this preserves the side-by-side eye layout.
 		frameTex.draw(0, 0, winW, eyesH);
-	} else {
-		ofSetColor(180);
-		ofDrawBitmapString("omnivisu receiver - waiting for stream on UDP port "
-			+ ofToString(config.getListenPort()), 20, 30);
 	}
 
 	// Mouth strip below the eyes: the sender's LED grid upscaled
@@ -141,16 +177,29 @@ void ofApp::draw() {
 		ofPopStyle();
 	}
 
-	// Received presence fade, applied at draw time over eyes + mouth. Can be
-	// switched off with 'a' to inspect the raw stream; the info bar below is
-	// drawn after this overlay so it always stays readable.
-	if (applyFade && hasState && stateFade < 1.0f) {
+	// Draw-time fade over eyes + mouth: the received presence fade multiplied
+	// by the local link fade. 'a' only disables the *received* part (to
+	// inspect the raw stream); the link fade always applies so a dead sender
+	// never leaves a frozen frame on screen. The info bar below is drawn
+	// after this overlay so it always stays readable.
+	const float remoteFade = (applyFade && hasState) ? stateFade : 1.0f;
+	const float effectiveFade = remoteFade * linkFade;
+	if (effectiveFade < 1.0f) {
 		ofPushStyle();
 		ofEnableAlphaBlending();
 		ofFill();
-		ofSetColor(0, 0, 0, static_cast<int>((1.0f - stateFade) * 255.0f));
+		ofSetColor(0, 0, 0, static_cast<int>((1.0f - effectiveFade) * 255.0f));
 		ofDrawRectangle(0.0f, 0.0f, winW, winH);
 		ofPopStyle();
+	}
+
+	// Waiting notice: before the first frame ever, or once a lost stream has
+	// fully faded to black (the frozen frame stays underneath so a returning
+	// sender fades in over it until fresh frames replace it).
+	if (!hasFrame || (!streamAlive && linkFade <= 0.0f)) {
+		ofSetColor(180);
+		ofDrawBitmapString("omnivisu receiver - waiting for stream on UDP port "
+			+ ofToString(config.getListenPort()), 20, 30);
 	}
 
 	if (showInfo) {
@@ -160,7 +209,9 @@ void ofApp::draw() {
 			<< " | frames " << receiver.getFrameCount()
 			<< " | dropped " << receiver.getDroppedCount()
 			<< " | fade " << (hasState ? ofToString(stateFade, 2) : std::string("--"))
-			<< " (" << (applyFade ? "applied" : "off") << ")";
+			<< " (" << (applyFade ? "applied" : "off") << ")"
+			<< " | link " << ofToString(linkFade, 2)
+			<< (streamAlive ? "" : " (lost)");
 
 		const float textX = 20.0f;
 		const float textY = winH - 20.0f;

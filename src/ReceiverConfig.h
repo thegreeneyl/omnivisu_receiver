@@ -27,6 +27,15 @@ public:
 	/// Height in pixels of the mouth strip band below the eyes.
 	int getMouthBand() const { return mouthBand; }
 
+	/// Seconds without a state packet before the sender counts as gone.
+	/// State packets (not video) are the heartbeat: the sender keeps sending
+	/// them even while the video stream is gated off at fade 0.
+	float getStreamTimeoutSeconds() const { return streamTimeoutSeconds; }
+	/// Ramp times of the local link fade that blacks out the frozen frame
+	/// when the sender disappears and fades back in when it returns.
+	float getFadeInSeconds() const { return fadeInSeconds; }
+	float getFadeOutSeconds() const { return fadeOutSeconds; }
+
 private:
 	int listenPort = 12345;
 	int width = 828;
@@ -36,5 +45,8 @@ private:
 	float scale = 1.0f;
 	bool applyFade = true;
 	int mouthBand = 36;
+	float streamTimeoutSeconds = 1.0f;
+	float fadeInSeconds = 0.5f;
+	float fadeOutSeconds = 2.0f;
 	bool loaded = false;
 };
