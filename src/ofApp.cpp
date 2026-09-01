@@ -60,6 +60,8 @@ void ofApp::setup() {
 	// visible immediately - before any packet and with no sender at all.
 	mouthDisplay.setup(mouthDisplayConfig());
 
+	artnet.setup(artnetConfig());
+
 	if (!receiver.setup(config.getListenPort())) {
 		ofLogError("omnivisu_receiver") << "failed to start stream receiver";
 	}
@@ -78,6 +80,20 @@ MouthDisplay::Config ofApp::mouthDisplayConfig() const {
 	c.color = config.getMouthColor();
 	c.neutralWidth = config.getMouthNeutralWidth();
 	c.transitionSeconds = config.getMouthTransitionSeconds();
+	return c;
+}
+
+//--------------------------------------------------------------
+ArtnetSender::Config ofApp::artnetConfig() const {
+	ArtnetSender::Config c;
+	c.enabled = config.getArtnetEnabled();
+	c.ip = config.getArtnetIp();
+	c.port = config.getArtnetPort();
+	c.universes = config.getArtnetUniverses();
+	c.startChannel = config.getArtnetStartChannel();
+	c.colorOrder = config.getArtnetColorOrder();
+	c.startCorner = config.getArtnetStartCorner();
+	c.snake = config.getArtnetSnake();
 	return c;
 }
 
@@ -226,6 +242,9 @@ void ofApp::reloadRuntimeConfig() {
 	mouthDisplay.setup(mouthDisplayConfig());
 	warnedGridMismatch = false;
 
+	// ArtNet is fully runtime-tunable: the socket is recreated on reload.
+	artnet.setup(artnetConfig());
+
 	loadGradingParams();
 	ofLogNotice("omnivisu_receiver") << "config + grading reloaded";
 }
@@ -330,6 +349,12 @@ void ofApp::update() {
 	mouthDisplay.setEyeIntensity(1.0f - remoteFade * linkFade);
 	mouthDisplay.update(dt);
 
+	// Ship the freshly rasterized fixture grid to the lights. Same frame to
+	// every configured universe (one universe per building side).
+	if (artnet.isEnabled()) {
+		artnet.send(mouthDisplay.getLightPixels());
+	}
+
 	if (now - lastLogTime >= 2.0f) {
 		ofLogNotice("omnivisu_receiver") << "render_fps=" << ofToString(ofGetFrameRate(), 1)
 			<< " recv_fps=" << ofToString(receivedFps, 1)
@@ -340,6 +365,8 @@ void ofApp::update() {
 			<< (applyFade ? "" : " (not applied)")
 			<< " link=" << ofToString(linkFade, 2)
 			<< " mouth=" << (mouthDisplay.isIdle() ? "idle" : "live")
+			<< " artnet=" << (artnet.isEnabled()
+				? ofToString(artnet.getPacketCount()) : std::string("off"))
 			<< (streamAlive ? "" : " (stream lost)");
 		lastLogTime = now;
 	}
@@ -506,6 +533,7 @@ void ofApp::draw() {
 //--------------------------------------------------------------
 void ofApp::exit() {
 	receiver.close();
+	artnet.close();
 }
 
 //--------------------------------------------------------------

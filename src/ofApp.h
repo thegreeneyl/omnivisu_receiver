@@ -5,6 +5,7 @@
 #include "ReceiverConfig.h"
 #include "EyeStreamReceiver.h"
 #include "MouthDisplay.h"
+#include "ArtnetSender.h"
 
 class ofApp : public ofBaseApp {
 public:
@@ -48,6 +49,10 @@ private:
 	// fades by design, so it never disappears.
 	MouthDisplay mouthDisplay;
 	bool warnedGridMismatch = false; ///< One-shot sender-span vs local-span warning.
+	// ArtNet output of the fixture grid: the rasterized lights (mouth + eye
+	// blocks) are read back each frame and sent as one DMX frame to every
+	// configured universe.
+	ArtnetSender artnet;
 	// Whether the received fade darkens the rendered eyes ('a' toggles at
 	// runtime; initial value from config). The numeric fade in the info bar
 	// stays visible either way so the link can be verified.
@@ -96,6 +101,8 @@ private:
 	void allocateLedFbo();
 	/// Assembles the MouthDisplay parameters from the "mouth" config block.
 	MouthDisplay::Config mouthDisplayConfig() const;
+	/// Assembles the ArtnetSender parameters from the "artnet" config block.
+	ArtnetSender::Config artnetConfig() const;
 	bool loadGradingParams();
 	bool saveGradingParams();
 	/// Re-reads config.json for the runtime-safe values (fades, timeout,

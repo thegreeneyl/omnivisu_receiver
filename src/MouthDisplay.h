@@ -78,6 +78,10 @@ public:
 	const ofTexture & getTexture() const { return lightsFbo.getTexture(); }
 	bool isAllocated() const { return lightsFbo.isAllocated(); }
 
+	/// Reads the current light grid back to the CPU (lights.w x lights.h RGB
+	/// pixels, row-major from the top-left light). This is the ArtNet source.
+	const ofPixels & getLightPixels();
+
 private:
 	/// Neutral pose edges: neutral_width lights centered on the mouth span.
 	void computeIdleEdges(float & left, float & right) const;
@@ -103,4 +107,5 @@ private:
 
 	ofFbo lightsFbo;   ///< lights.w x lights.h - one texel per physical light.
 	ofFbo lightsSsFbo; ///< Supersample target (lights * kSupersample).
+	ofPixels lightsPixels; ///< CPU copy of lightsFbo for getLightPixels().
 };

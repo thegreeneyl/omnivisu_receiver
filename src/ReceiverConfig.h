@@ -3,6 +3,7 @@
 #include "ofMain.h"
 
 #include <string>
+#include <vector>
 
 /// Loads the receiver's config.json. Holds the UDP listen port, the expected
 /// canvas dimensions (two eyes side-by-side), and window/display options.
@@ -79,6 +80,22 @@ public:
 	/// Ease duration toward a new target (~95% done after this time).
 	float getMouthTransitionSeconds() const { return mouthTransitionSeconds; }
 
+	// --- ArtNet output (config "artnet" block) ---
+	// The fixture grid is one universe's DMX frame, sent identically to every
+	// listed universe (the building repeats the lights on two sides).
+	bool getArtnetEnabled() const { return artnetEnabled; }
+	std::string getArtnetIp() const { return artnetIp; }
+	int getArtnetPort() const { return artnetPort; }
+	const std::vector<int> & getArtnetUniverses() const { return artnetUniverses; }
+	/// 1-based DMX address of the first light's first channel.
+	int getArtnetStartChannel() const { return artnetStartChannel; }
+	/// Channel order per light, chars R/G/B/W (e.g. "RGB", "GBR", "RGBW").
+	std::string getArtnetColorOrder() const { return artnetColorOrder; }
+	/// Traversal start: top_left/top_right/bottom_left/bottom_right.
+	std::string getArtnetStartCorner() const { return artnetStartCorner; }
+	/// Serpentine rows (true) or every row in the same direction (false).
+	bool getArtnetSnake() const { return artnetSnake; }
+
 private:
 	int listenPort = 12345;
 	int width = 828;
@@ -105,5 +122,13 @@ private:
 	ofColor mouthColor{255, 255, 255, 255};
 	int mouthNeutralWidth = 6;
 	float mouthTransitionSeconds = 0.2f;
+	bool artnetEnabled = false;
+	std::string artnetIp = "255.255.255.255";
+	int artnetPort = 6454;
+	std::vector<int> artnetUniverses{0, 1};
+	int artnetStartChannel = 1;
+	std::string artnetColorOrder = "RGB";
+	std::string artnetStartCorner = "top_left";
+	bool artnetSnake = true;
 	bool loaded = false;
 };

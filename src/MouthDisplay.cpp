@@ -118,6 +118,14 @@ void MouthDisplay::draw(float x, float y, float w, float h) const {
 }
 
 //--------------------------------------------------------------
+const ofPixels & MouthDisplay::getLightPixels() {
+	if (lightsFbo.isAllocated()) {
+		lightsFbo.readToPixels(lightsPixels);
+	}
+	return lightsPixels;
+}
+
+//--------------------------------------------------------------
 void MouthDisplay::allocateFbos() {
 	const int ssW = cfg.lights.x * kSupersample;
 	const int ssH = cfg.lights.y * kSupersample;

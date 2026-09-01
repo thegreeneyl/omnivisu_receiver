@@ -13,7 +13,7 @@
         "mouth_band": 96,
         "stream_timeout_seconds": 1.0,
         "fade_in_seconds": 0.5,
-        "fade_out_seconds": 2.0
+        "fade_out_seconds": 1.0
     },
     "mouth": {
         "lights": { "w": 18, "h": 5 },
@@ -28,5 +28,15 @@
         "row": 1,
         "offset": 2,
         "span": 3
+    },
+    "artnet": {
+        "enabled": false,
+        "ip": "255.255.255.255",
+        "port": 6454,
+        "universes": [0, 1],
+        "start_channel": 1,
+        "color_order": "RGB",
+        "start_corner": "top_left",
+        "snake": true
     }
 }

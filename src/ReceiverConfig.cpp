@@ -91,6 +91,26 @@ bool ReceiverConfig::load(const std::string & path) {
 		eyeSpan = e.value("span", eyeSpan);
 	}
 
+	// ArtNet output: node address, target universes, and the grid-to-channel
+	// mapping (validated further in ArtnetSender::setup).
+	if (json.contains("artnet")) {
+		const auto & a = json["artnet"];
+		artnetEnabled = a.value("enabled", artnetEnabled);
+		artnetIp = a.value("ip", artnetIp);
+		artnetPort = a.value("port", artnetPort);
+		if (a.contains("universes") && a["universes"].is_array()
+			&& !a["universes"].empty()) {
+			artnetUniverses.clear();
+			for (const auto & u : a["universes"]) {
+				artnetUniverses.push_back(u.get<int>());
+			}
+		}
+		artnetStartChannel = a.value("start_channel", artnetStartChannel);
+		artnetColorOrder = a.value("color_order", artnetColorOrder);
+		artnetStartCorner = a.value("start_corner", artnetStartCorner);
+		artnetSnake = a.value("snake", artnetSnake);
+	}
+
 	mouthRow = std::clamp(mouthRow, 0, mouthLightsH - 1);
 	mouthOffset = std::clamp(mouthOffset, 0, mouthLightsW - 1);
 	mouthSpan = std::clamp(mouthSpan, 1, mouthLightsW - mouthOffset);
