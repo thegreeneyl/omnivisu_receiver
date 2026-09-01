@@ -8,8 +8,11 @@ void MouthDisplay::setup(const Config & c) {
 	cfg = c;
 	cfg.lights.x = std::max(1, cfg.lights.x);
 	cfg.lights.y = std::max(1, cfg.lights.y);
+	cfg.row = std::clamp(cfg.row, 0, cfg.lights.y - 1);
+	cfg.offset = std::clamp(cfg.offset, 0, cfg.lights.x - 1);
+	cfg.span = std::clamp(cfg.span, 1, cfg.lights.x - cfg.offset);
 	// Never below 1 light: the mouth must always show something.
-	cfg.neutralWidth = std::clamp(cfg.neutralWidth, 1, cfg.lights.x);
+	cfg.neutralWidth = std::clamp(cfg.neutralWidth, 1, cfg.span);
 	cfg.transitionSeconds = std::max(0.0f, cfg.transitionSeconds);
 
 	allocateFbos();
@@ -30,24 +33,26 @@ void MouthDisplay::setup(const Config & c) {
 
 	renderLights();
 
-	ofLogNotice("MouthDisplay") << "setup: lights " << cfg.lights.x << "x"
-		<< cfg.lights.y << ", neutral_width " << cfg.neutralWidth
+	ofLogNotice("MouthDisplay") << "setup: fixture " << cfg.lights.x << "x"
+		<< cfg.lights.y << ", mouth row " << cfg.row
+		<< " offset " << cfg.offset << " span " << cfg.span
+		<< ", neutral_width " << cfg.neutralWidth
 		<< ", transition " << cfg.transitionSeconds << "s";
 }
 
 //--------------------------------------------------------------
 void MouthDisplay::computeIdleEdges(float & left, float & right) const {
-	const int w = std::clamp(cfg.neutralWidth, 1, cfg.lights.x);
-	const int l = static_cast<int>(std::lround((cfg.lights.x - w) * 0.5f));
+	const int w = std::clamp(cfg.neutralWidth, 1, cfg.span);
+	const int l = static_cast<int>(std::lround((cfg.span - w) * 0.5f));
 	left = static_cast<float>(l);
 	right = static_cast<float>(l + w);
 }
 
 //--------------------------------------------------------------
 void MouthDisplay::setTarget(float left, float right) {
-	const float gridW = static_cast<float>(cfg.lights.x);
-	left = ofClamp(left, 0.0f, gridW);
-	right = ofClamp(right, left, gridW);
+	const float span = static_cast<float>(cfg.span);
+	left = ofClamp(left, 0.0f, span);
+	right = ofClamp(right, left, span);
 	// Degenerate edges (e.g. a zeroed packet) fall back to neutral: the
 	// mouth must never collapse to nothing.
 	if (right - left < 0.5f) {
@@ -92,9 +97,9 @@ void MouthDisplay::draw(float x, float y, float w, float h) const {
 		return;
 	}
 	// Full opacity always: the mouth is exempt from the presence and link
-	// fades by design.
+	// fades by design. Cells are already opaque RGB (on = white, off = black).
 	ofPushStyle();
-	ofEnableAlphaBlending();
+	ofDisableAlphaBlending();
 	ofSetColor(255);
 	lightsFbo.getTexture().draw(x, y, w, h);
 	ofPopStyle();
@@ -111,7 +116,8 @@ void MouthDisplay::allocateFbos() {
 		&& static_cast<int>(lightsFbo.getWidth()) == cfg.lights.x
 		&& static_cast<int>(lightsFbo.getHeight()) == cfg.lights.y
 		&& lightsSsFbo.isAllocated()
-		&& static_cast<int>(lightsSsFbo.getWidth()) == ssW) {
+		&& static_cast<int>(lightsSsFbo.getWidth()) == ssW
+		&& static_cast<int>(lightsSsFbo.getHeight()) == ssH) {
 		return;
 	}
 
@@ -121,14 +127,14 @@ void MouthDisplay::allocateFbos() {
 	ofFboSettings ss;
 	ss.width = ssW;
 	ss.height = ssH;
-	ss.internalformat = GL_RGBA;
+	ss.internalformat = GL_RGB;
 	ss.textureTarget = GL_TEXTURE_2D;
 	ss.numSamples = 0;
 	ss.useDepth = false;
 	ss.useStencil = false;
 	lightsSsFbo.allocate(ss);
 	lightsSsFbo.begin();
-	ofClear(0, 0, 0, 0);
+	ofClear(0, 0, 0, 255);
 	lightsSsFbo.end();
 	// Mipmaps give a true area average when downsampling: kSupersample is a
 	// power of two, so the lights.x x lights.y mip level is the exact mean of
@@ -141,7 +147,7 @@ void MouthDisplay::allocateFbos() {
 	ofFboSettings lf;
 	lf.width = cfg.lights.x;
 	lf.height = cfg.lights.y;
-	lf.internalformat = GL_RGBA;
+	lf.internalformat = GL_RGB;
 	lf.textureTarget = GL_TEXTURE_2D;
 	lf.numSamples = 0;
 	lf.useDepth = false;
@@ -151,7 +157,7 @@ void MouthDisplay::allocateFbos() {
 	lightsFbo.getTexture().setTextureMinMagFilter(GL_NEAREST, GL_NEAREST);
 
 	lightsFbo.begin();
-	ofClear(0, 0, 0, 0);
+	ofClear(0, 0, 0, 255);
 	lightsFbo.end();
 }
 
@@ -161,26 +167,29 @@ void MouthDisplay::renderLights() {
 		return;
 	}
 
+	const float ss = static_cast<float>(kSupersample);
 	const float ssW = lightsSsFbo.getWidth();
 	const float ssH = lightsSsFbo.getHeight();
-	// Edges live in light units; one light = kSupersample supersample pixels.
-	float leftPx = ofClamp(currentLeft * kSupersample, 0.0f, ssW);
-	float rightPx = ofClamp(currentRight * kSupersample, 0.0f, ssW);
+	// Edges live in mouth-span units; shift them onto the fixture by offset.
+	float leftPx = ofClamp((static_cast<float>(cfg.offset) + currentLeft) * ss, 0.0f, ssW);
+	float rightPx = ofClamp((static_cast<float>(cfg.offset) + currentRight) * ss, 0.0f, ssW);
 	if (rightPx < leftPx) {
 		rightPx = leftPx;
 	}
+	const float topPx = ofClamp(static_cast<float>(cfg.row) * ss, 0.0f, ssH);
+	const float rowH = std::min(ss, ssH - topPx);
 
-	// Supersampled pass. The background is cleared to the mouth COLOR with
-	// alpha 0 (not transparent black) so the downsample average only dilutes
-	// alpha, never the color: a half-covered light keeps the full RGB and
-	// gets half the alpha, which blends linearly with coverage on screen.
+	// Opaque RGB raster: off cells are black, a fully covered mouth cell is
+	// the configured color at full value (no alpha fade). Partial coverage
+	// at the moving edges averages toward black in the downsample, which is
+	// the RGB brightness the ArtNet path will eventually send.
 	lightsSsFbo.begin();
-	ofClear(cfg.color.r, cfg.color.g, cfg.color.b, 0);
+	ofClear(0, 0, 0, 255);
 	ofPushStyle();
 	ofDisableAlphaBlending();
 	ofFill();
-	ofSetColor(cfg.color);
-	ofDrawRectangle(leftPx, 0.0f, rightPx - leftPx, ssH);
+	ofSetColor(cfg.color.r, cfg.color.g, cfg.color.b, 255);
+	ofDrawRectangle(leftPx, topPx, rightPx - leftPx, rowH);
 	ofPopStyle();
 	lightsSsFbo.end();
 
@@ -188,7 +197,7 @@ void MouthDisplay::renderLights() {
 	// allocateFbos). Blending stays off: this is a resolve, not a composite.
 	lightsSsFbo.getTexture().generateMipmap();
 	lightsFbo.begin();
-	ofClear(0, 0, 0, 0);
+	ofClear(0, 0, 0, 255);
 	ofPushStyle();
 	ofDisableAlphaBlending();
 	ofSetColor(255);

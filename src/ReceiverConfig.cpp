@@ -1,5 +1,7 @@
 #include "ReceiverConfig.h"
 
+#include <algorithm>
+
 //--------------------------------------------------------------
 bool ReceiverConfig::load(const std::string & path) {
 	loaded = false;
@@ -55,8 +57,9 @@ bool ReceiverConfig::load(const std::string & path) {
 		fadeOutSeconds = r.value("fade_out_seconds", fadeOutSeconds);
 	}
 
-	// Mouth presentation: the receiver owns easing + the neutral idle pose
-	// (the wire only carries target edges), so these are receiver-side knobs.
+	// Mouth presentation: the receiver owns fixture placement, easing, and
+	// the neutral idle pose (the wire only carries target edges in the
+	// mouth-span), so these are receiver-side knobs.
 	if (json.contains("mouth")) {
 		const auto & m = json["mouth"];
 		if (m.contains("lights")) {
@@ -64,6 +67,9 @@ bool ReceiverConfig::load(const std::string & path) {
 			mouthLightsW = std::max(1, l.value("w", mouthLightsW));
 			mouthLightsH = std::max(1, l.value("h", mouthLightsH));
 		}
+		mouthRow = m.value("row", mouthRow);
+		mouthOffset = m.value("offset", mouthOffset);
+		mouthSpan = m.value("span", mouthSpan);
 		if (m.contains("color")) {
 			const auto & c = m["color"];
 			mouthColor.r = static_cast<int>(ofClamp(c.value("r", static_cast<int>(mouthColor.r)), 0, 255));
@@ -76,6 +82,11 @@ bool ReceiverConfig::load(const std::string & path) {
 			m.value("transition_seconds", mouthTransitionSeconds));
 	}
 
+	mouthRow = std::clamp(mouthRow, 0, mouthLightsH - 1);
+	mouthOffset = std::clamp(mouthOffset, 0, mouthLightsW - 1);
+	mouthSpan = std::clamp(mouthSpan, 1, mouthLightsW - mouthOffset);
+	mouthNeutralWidth = std::clamp(mouthNeutralWidth, 1, mouthSpan);
+
 	loaded = true;
 	const char * modeName = windowMode == WindowMode::Fullscreen ? "fullscreen"
 		: windowMode == WindowMode::Borderless ? "borderless"
@@ -85,6 +96,9 @@ bool ReceiverConfig::load(const std::string & path) {
 		<< ", led=" << ledWidth << "x" << ledHeight
 		<< ", window_mode=" << modeName
 		<< ", vsync=" << (vsync ? "on" : "off")
-		<< ", scale=" << scale << ")";
+		<< ", scale=" << scale
+		<< ", mouth=" << mouthLightsW << "x" << mouthLightsH
+		<< " row=" << mouthRow << " offset=" << mouthOffset
+		<< " span=" << mouthSpan << ")";
 	return true;
 }

@@ -43,11 +43,11 @@ private:
 	EyeStreamReceiver::MouthState mouthState;
 	// Receiver-side mouth presentation: eases toward the live target while
 	// the stream is alive, and toward the local neutral pose otherwise
-	// (timeout, startup, fade-only packets). Drawn as a strip below the
-	// eyes, ALWAYS at full opacity - the mouth is exempt from both fades by
-	// design, so it never disappears.
+	// (timeout, startup, fade-only packets). Drawn as the 18x5 fixture grid
+	// below the eyes, ALWAYS at full opacity - the mouth is exempt from both
+	// fades by design, so it never disappears.
 	MouthDisplay mouthDisplay;
-	bool warnedGridMismatch = false; ///< One-shot sender/local grid-size warning.
+	bool warnedGridMismatch = false; ///< One-shot sender-span vs local-span warning.
 	// Whether the received fade darkens the rendered eyes ('a' toggles at
 	// runtime; initial value from config). The numeric fade in the info bar
 	// stays visible either way so the link can be verified.

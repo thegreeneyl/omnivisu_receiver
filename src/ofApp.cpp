@@ -56,7 +56,7 @@ void ofApp::setup() {
 	gradingPanel.setup(gradingGroup);
 	loadGradingParams();
 
-	// Mouth presentation: starts on its neutral pose, so the strip is
+	// Mouth presentation: starts on its neutral pose, so the fixture grid is
 	// visible immediately - before any packet and with no sender at all.
 	mouthDisplay.setup(mouthDisplayConfig());
 
@@ -69,6 +69,9 @@ void ofApp::setup() {
 MouthDisplay::Config ofApp::mouthDisplayConfig() const {
 	MouthDisplay::Config c;
 	c.lights = {config.getMouthLightsW(), config.getMouthLightsH()};
+	c.row = config.getMouthRow();
+	c.offset = config.getMouthOffset();
+	c.span = config.getMouthSpan();
 	c.color = config.getMouthColor();
 	c.neutralWidth = config.getMouthNeutralWidth();
 	c.transitionSeconds = config.getMouthTransitionSeconds();
@@ -215,8 +218,8 @@ void ofApp::reloadRuntimeConfig() {
 	}
 
 	// Mouth presentation parameters (neutral_width, transition_seconds,
-	// color, grid) are runtime-tunable; the eased edges are kept so a reload
-	// never makes the mouth jump.
+	// color, fixture grid, row/offset/span) are runtime-tunable; the eased
+	// edges are kept so a reload never makes the mouth jump.
 	mouthDisplay.setup(mouthDisplayConfig());
 	warnedGridMismatch = false;
 
@@ -241,18 +244,18 @@ void ofApp::update() {
 	// state; the mouth drive below then falls back onto the neutral pose.
 	if (receiver.getLatestState(mouthState)) {
 		hasState = true;
-		// The packet's grid size is a sanity check against the local config
-		// (the target edges are in the SENDER's light units); a mismatch
-		// distorts the pose, so it is worth one loud log line.
+		// The packet's grid size is the sender's mouth SPAN (typically 14x1),
+		// not the physical 18x5 fixture. Edges are in those span units; a
+		// mismatch distorts the pose, so it is worth one loud log line.
 		if (mouthState.hasTarget && !warnedGridMismatch
-			&& (mouthState.lightsW != mouthDisplay.getGridSize().x
-				|| mouthState.lightsH != mouthDisplay.getGridSize().y)) {
+			&& (mouthState.lightsW != mouthDisplay.getMouthSpan()
+				|| mouthState.lightsH != 1)) {
 			warnedGridMismatch = true;
 			ofLogWarning("omnivisu_receiver")
-				<< "sender light grid " << mouthState.lightsW << "x" << mouthState.lightsH
-				<< " differs from local mouth.lights "
-				<< mouthDisplay.getGridSize().x << "x" << mouthDisplay.getGridSize().y
-				<< " - fix config.json so the grids match";
+				<< "sender mouth span " << mouthState.lightsW << "x" << mouthState.lightsH
+				<< " differs from local mouth.span "
+				<< mouthDisplay.getMouthSpan() << "x1"
+				<< " - fix config.json so the spans match";
 		}
 	}
 
@@ -345,15 +348,15 @@ void ofApp::draw() {
 	// right) because the LED wraps the front and back of the building. Black
 	// whenever there is no live stream.
 	//
-	// UI area (below ledH): mouth strip, status text, notices. Monochrome
-	// white on black, laid out on fixed rows so nothing ever overlaps.
+	// UI area (below ledH): mouth fixture grid, status text, notices.
+	// Monochrome white on black, laid out on fixed rows so nothing overlaps.
 	const float ledW = config.getLedWidth() * drawScale;
 	const float ledH = config.getLedHeight() * drawScale;
 
 	// Effective fade: received presence fade times the local link fade. 'a'
 	// only disables the *received* part (to inspect the raw stream); the link
 	// fade always applies so a dead sender never leaves a frozen frame. The
-	// fade darkens the EYES only - the mouth strip below stays fully visible
+	// fade darkens the EYES only - the mouth grid below stays fully visible
 	// and eases to its neutral pose instead.
 	const float remoteFade = (applyFade && hasState) ? mouthState.fade : 1.0f;
 	const float effectiveFade = remoteFade * linkFade;
@@ -411,25 +414,32 @@ void ofApp::draw() {
 	const float textY = stripY + bandH + 24.0f; // status row baseline
 	const float noticeY = textY + 20.0f;        // notices row baseline
 
-	// Mouth strip: the receiver-side mouth (eased live target or the neutral
-	// idle pose) upscaled nearest-neighbor with cell ticks. NEVER dimmed by
-	// the fades: the mouth must always be present on the building; with no
-	// data it shows the neutral pose instead of disappearing.
+	// Mouth fixture grid: the receiver-side 18x5 RGB lights (eased live
+	// target or the neutral idle pose, occupying the 4th row) upscaled
+	// nearest-neighbor with cell ticks. NEVER dimmed by the fades: the mouth
+	// must always be present on the building; with no data it shows the
+	// neutral pose instead of disappearing.
 	if (bandH > 0.0f && mouthDisplay.isAllocated()) {
 		const float stripX = pad;
 		const float stripW = ledW - 2.0f * pad;
 		const float stripH = std::max(1.0f, bandH - 2.0f * pad);
-		const int cells = mouthDisplay.getGridSize().x;
+		const int cols = mouthDisplay.getGridSize().x;
+		const int rows = mouthDisplay.getGridSize().y;
 
 		mouthDisplay.draw(stripX, stripY, stripW, stripH);
 		ofPushStyle();
 		ofEnableAlphaBlending();
 		ofNoFill();
 		ofSetColor(90);
-		const float cellPx = stripW / static_cast<float>(cells);
-		for (int c = 1; c < cells; ++c) {
-			const float x = stripX + c * cellPx;
+		const float cellW = stripW / static_cast<float>(cols);
+		const float cellH = stripH / static_cast<float>(rows);
+		for (int c = 1; c < cols; ++c) {
+			const float x = stripX + c * cellW;
 			ofDrawLine(x, stripY, x, stripY + stripH);
+		}
+		for (int r = 1; r < rows; ++r) {
+			const float y = stripY + r * cellH;
+			ofDrawLine(stripX, y, stripX + stripW, y);
 		}
 		ofSetColor(255);
 		ofDrawRectangle(stripX, stripY, stripW, stripH);
@@ -476,7 +486,7 @@ void ofApp::draw() {
 			+ ofToString(config.getListenPort()), pad, noticeY);
 	}
 
-	// Grading panel: right side of the UI area, below the mouth strip. The
+	// Grading panel: right side of the UI area, below the mouth grid. The
 	// position is clamped every frame so it can never sit inside the LED
 	// area regardless of window size or scale.
 	const float panelX = std::max(pad, ledW - gradingPanel.getWidth() - pad);

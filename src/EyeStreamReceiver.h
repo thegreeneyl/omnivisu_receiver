@@ -27,7 +27,7 @@ public:
 	struct MouthState {
 		float fade = 0.0f; ///< Shaped presence fade for the eyes, 0..1.
 		bool hasTarget = false;
-		int lightsW = 0; ///< Sender's grid size (sanity check for the local grid).
+		int lightsW = 0; ///< Sender's mouth span (sanity check against local span).
 		int lightsH = 0;
 		float targetLeft = 0.0f;
 		float targetRight = 0.0f;
