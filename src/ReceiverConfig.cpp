@@ -28,6 +28,8 @@ bool ReceiverConfig::load(const std::string & path) {
 		listenPort = r.value("listen_port", listenPort);
 		width = r.value("width", width);
 		height = r.value("height", height);
+		ledWidth = r.value("led_width", ledWidth);
+		ledHeight = r.value("led_height", ledHeight);
 		// "window_mode" wins; the legacy bool "fullscreen" is honoured as a
 		// fallback so old config files keep working.
 		std::string mode = r.value("fullscreen", false) ? "fullscreen" : "windowed";
@@ -59,6 +61,7 @@ bool ReceiverConfig::load(const std::string & path) {
 											   : "windowed";
 	ofLogNotice("ReceiverConfig") << "loaded " << path << " (port=" << listenPort
 		<< ", canvas=" << width << "x" << height
+		<< ", led=" << ledWidth << "x" << ledHeight
 		<< ", window_mode=" << modeName
 		<< ", vsync=" << (vsync ? "on" : "off")
 		<< ", scale=" << scale << ")";

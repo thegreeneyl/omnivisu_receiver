@@ -3,6 +3,8 @@
         "listen_port": 12345,
         "width": 828,
         "height": 280,
+        "led_width": 2688,
+        "led_height": 504,
         "window_mode": "windowed",
         "display": 0,
         "vsync": true,

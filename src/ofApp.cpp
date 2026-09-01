@@ -151,71 +151,70 @@ void ofApp::update() {
 void ofApp::draw() {
 	ofClear(0, 255);
 
-	// Content is anchored to the upper-left corner at its configured pixel
-	// size (times drawScale in windowed dev mode): the LED controller samples
-	// the corner of the screen, so the canvas must never move or stretch with
-	// the window. The mouth strip band sits directly below the canvas.
-	const float winH = static_cast<float>(ofGetHeight());
-	const float canvasW = config.getWidth() * drawScale;
-	const float canvasH = config.getHeight() * drawScale;
-	const float bandH = static_cast<float>(config.getMouthBand());
+	// Two zones, both anchored to the window's upper-left corner:
+	//
+	// LED area (0,0 .. ledW,ledH): sampled by the LED controller. Only the
+	// eye canvas renders here - twice side by side (left, right, left,
+	// right) because the LED wraps the front and back of the building. Black
+	// whenever there is no live stream.
+	//
+	// UI area (below ledH): mouth strip, status text, notices. Monochrome
+	// white on black, laid out on fixed rows so nothing ever overlaps.
+	const float ledW = config.getLedWidth() * drawScale;
+	const float ledH = config.getLedHeight() * drawScale;
+	const float halfW = ledW * 0.5f;
+
+	// Effective fade: received presence fade times the local link fade. 'a'
+	// only disables the *received* part (to inspect the raw stream); the link
+	// fade always applies so a dead sender never leaves a frozen frame.
+	const float remoteFade = (applyFade && hasState) ? stateFade : 1.0f;
+	const float effectiveFade = remoteFade * linkFade;
 
 	if (hasFrame && frameTex.isAllocated()) {
 		ofSetColor(255);
-		frameTex.draw(0, 0, canvasW, canvasH);
+		frameTex.draw(0, 0, halfW, ledH);
+		frameTex.draw(halfW, 0, halfW, ledH);
 	}
 
-	// Mouth strip below the eyes: the sender's LED grid upscaled
-	// nearest-neighbor with cell ticks, matching the sender's debug strip.
-	if (bandH > 0.0f && lightsTex.isAllocated() && lightsTex.getWidth() > 0) {
-		const float pad = 4.0f;
-		const float stripX = pad;
-		const float stripY = canvasH + pad;
-		const float stripW = canvasW - 2.0f * pad;
-		const float stripH = std::max(1.0f, bandH - 2.0f * pad);
-		const int cells = static_cast<int>(lightsTex.getWidth());
-
-		ofPushStyle();
-		ofEnableAlphaBlending();
-		ofFill();
-		ofSetColor(0, 0, 0, 200); // dark backdrop so dim lights stay readable
-		ofDrawRectangle(stripX - 2.0f, stripY - 2.0f, stripW + 4.0f, stripH + 4.0f);
-		ofSetColor(255);
-		lightsTex.draw(stripX, stripY, stripW, stripH);
-		ofNoFill();
-		ofSetColor(110, 110, 110, 200);
-		const float cellPx = stripW / static_cast<float>(cells);
-		for (int c = 1; c < cells; ++c) {
-			const float x = stripX + c * cellPx;
-			ofDrawLine(x, stripY, x, stripY + stripH);
-		}
-		ofDrawRectangle(stripX, stripY, stripW, stripH);
-		ofPopStyle();
-	}
-
-	// Draw-time fade over eyes + mouth: the received presence fade multiplied
-	// by the local link fade. 'a' only disables the *received* part (to
-	// inspect the raw stream); the link fade always applies so a dead sender
-	// never leaves a frozen frame on screen. The info bar below is drawn
-	// after this overlay so it always stays readable.
-	const float remoteFade = (applyFade && hasState) ? stateFade : 1.0f;
-	const float effectiveFade = remoteFade * linkFade;
 	if (effectiveFade < 1.0f) {
 		ofPushStyle();
 		ofEnableAlphaBlending();
 		ofFill();
 		ofSetColor(0, 0, 0, static_cast<int>((1.0f - effectiveFade) * 255.0f));
-		ofDrawRectangle(0.0f, 0.0f, canvasW, canvasH + bandH);
+		ofDrawRectangle(0.0f, 0.0f, ledW, ledH);
 		ofPopStyle();
 	}
 
-	// Waiting notice: before the first frame ever, or once a lost stream has
-	// fully faded to black (the frozen frame stays underneath so a returning
-	// sender fades in over it until fresh frames replace it).
-	if (!hasFrame || (!streamAlive && linkFade <= 0.0f)) {
-		ofSetColor(180);
-		ofDrawBitmapString("omnivisu receiver - waiting for stream on UDP port "
-			+ ofToString(config.getListenPort()), 20, 30);
+	// ---- UI area ----
+	const float pad = 8.0f;
+	const float bandH = static_cast<float>(config.getMouthBand());
+	const float stripY = ledH + pad;
+	const float textY = stripY + bandH + 24.0f; // status row baseline
+	const float noticeY = textY + 20.0f;        // notices row baseline
+
+	// Mouth strip: the sender's LED grid upscaled nearest-neighbor with cell
+	// ticks. The lights are dimmed by the effective fade so the strip shows
+	// what the building's mouth actually does; the frame stays visible.
+	if (bandH > 0.0f && lightsTex.isAllocated() && lightsTex.getWidth() > 0) {
+		const float stripX = pad;
+		const float stripW = ledW - 2.0f * pad;
+		const float stripH = std::max(1.0f, bandH - 2.0f * pad);
+		const int cells = static_cast<int>(lightsTex.getWidth());
+
+		ofPushStyle();
+		ofEnableAlphaBlending();
+		ofSetColor(static_cast<int>(255.0f * effectiveFade));
+		lightsTex.draw(stripX, stripY, stripW, stripH);
+		ofNoFill();
+		ofSetColor(90);
+		const float cellPx = stripW / static_cast<float>(cells);
+		for (int c = 1; c < cells; ++c) {
+			const float x = stripX + c * cellPx;
+			ofDrawLine(x, stripY, x, stripY + stripH);
+		}
+		ofSetColor(255);
+		ofDrawRectangle(stripX, stripY, stripW, stripH);
+		ofPopStyle();
 	}
 
 	if (showInfo) {
@@ -229,26 +228,32 @@ void ofApp::draw() {
 			<< " | link " << ofToString(linkFade, 2)
 			<< (streamAlive ? "" : " (lost)");
 
-		const float textX = 20.0f;
-		const float textY = winH - 20.0f;
-		ofSetColor(0, 255, 0);
+		const float textX = pad;
+		ofSetColor(255);
 		ofDrawBitmapString(msg.str(), textX, textY);
 
-		// Fade meter right of the text (bitmap glyphs are 8 px wide) so the
-		// incoming value is visible at a glance even with apply off.
+		// Fade meter right of the text (bitmap glyphs are 8 px wide) showing
+		// the effective fade at a glance even with apply off.
 		const float meterX = textX + msg.str().size() * 8.0f + 16.0f;
 		const float meterW = 80.0f;
 		const float meterH = 10.0f;
 		const float meterY = textY - meterH + 1.0f;
 		ofPushStyle();
 		ofNoFill();
-		ofSetColor(0, 255, 0);
+		ofSetColor(255);
 		ofDrawRectangle(meterX, meterY, meterW, meterH);
-		if (hasState) {
-			ofFill();
-			ofDrawRectangle(meterX, meterY, meterW * stateFade, meterH);
-		}
+		ofFill();
+		ofDrawRectangle(meterX, meterY, meterW * effectiveFade, meterH);
 		ofPopStyle();
+	}
+
+	// Waiting notice (own row, below the status text so nothing overlaps):
+	// before the first frame ever, or once a lost stream has fully faded to
+	// black. The LED area itself stays black either way.
+	if (!hasFrame || (!streamAlive && linkFade <= 0.0f)) {
+		ofSetColor(255);
+		ofDrawBitmapString("waiting for stream on UDP port "
+			+ ofToString(config.getListenPort()), pad, noticeY);
 	}
 }
 

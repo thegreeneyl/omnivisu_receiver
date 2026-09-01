@@ -25,6 +25,11 @@ public:
 	int getListenPort() const { return listenPort; }
 	int getWidth() const { return width; }
 	int getHeight() const { return height; }
+	/// LED area: the upper-left region of the screen sampled by the LED
+	/// controller. Only the (doubled) eye canvas may render inside it; all
+	/// text/UI goes below.
+	int getLedWidth() const { return ledWidth; }
+	int getLedHeight() const { return ledHeight; }
 	WindowMode getWindowMode() const { return windowMode; }
 	/// Monitor index for fullscreen (multi-display setups).
 	int getDisplay() const { return display; }
@@ -50,6 +55,8 @@ private:
 	int listenPort = 12345;
 	int width = 828;
 	int height = 280;
+	int ledWidth = 2688;
+	int ledHeight = 504;
 	WindowMode windowMode = WindowMode::Windowed;
 	int display = 0;
 	bool vsync = true;

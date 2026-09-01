@@ -13,11 +13,11 @@ int main() {
 	ofGLFWWindowSettings settings;
 	settings.setGLVersion(3, 3);
 
-	// Windowed size: the eye canvas (scaled for small dev screens) plus the
-	// band below it for the mouth strip and info text.
-	const int w = static_cast<int>(config.getWidth() * config.getScale());
-	const int h = static_cast<int>(config.getHeight() * config.getScale())
-		+ config.getMouthBand();
+	// Windowed size: the LED area (scaled for small dev screens) plus the UI
+	// band below it (mouth strip + info text; matches ofApp::draw layout).
+	const int w = static_cast<int>(config.getLedWidth() * config.getScale());
+	const int h = static_cast<int>(config.getLedHeight() * config.getScale())
+		+ config.getMouthBand() + 72;
 
 	switch (config.getWindowMode()) {
 	case ReceiverConfig::WindowMode::Fullscreen:
