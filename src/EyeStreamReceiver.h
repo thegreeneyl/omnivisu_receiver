@@ -14,11 +14,25 @@
 /// (newest-complete-wins, never blocks for missing packets).
 ///
 /// The same socket also carries the sender's mouth/fade state datagrams
-/// (magic "MOUT", one small packet each, no reassembly). They are demuxed by
-/// magic, kept latest-wins keyed on (sessionId, sequence) exactly like the
-/// video frames, and published via getLatestState().
+/// (magic "MOUT", one small fixed-size packet each, no reassembly). They are
+/// demuxed by magic, kept latest-wins keyed on (sessionId, sequence) exactly
+/// like the video frames, and published via getLatestState().
 class EyeStreamReceiver : public ofThread {
 public:
+	/// The decoded mouth/fade state of the latest "MOUT" datagram. The mouth
+	/// travels as the sender's quantized target edges in light units of its
+	/// grid (left inclusive, right exclusive) - the receiver owns the easing
+	/// and rasterization. hasTarget is false for fade-only packets (sender
+	/// without a mouth loaded).
+	struct MouthState {
+		float fade = 0.0f; ///< Shaped presence fade for the eyes, 0..1.
+		bool hasTarget = false;
+		int lightsW = 0; ///< Sender's grid size (sanity check for the local grid).
+		int lightsH = 0;
+		float targetLeft = 0.0f;
+		float targetRight = 0.0f;
+	};
+
 	~EyeStreamReceiver() override;
 
 	/// Binds the UDP socket to listenPort and starts the worker thread.
@@ -32,9 +46,8 @@ public:
 	/// Copies the most recent mouth/fade state and returns true, or returns
 	/// false if no state packet has arrived yet. Unlike getLatestFrame this
 	/// always hands out the latest state (the caller wants the current fade
-	/// every render frame, not only on change). lights may come back
-	/// unallocated when the sender has no mouth loaded.
-	bool getLatestState(float & fade, ofPixels & lights);
+	/// and target every render frame, not only on change).
+	bool getLatestState(MouthState & out);
 
 	std::uint64_t getFrameCount() const { return frameCount.load(); }
 	std::uint64_t getDroppedCount() const { return droppedCount.load(); }
@@ -53,9 +66,8 @@ private:
 	bool newFrameAvailable = false;
 
 	// Latest mouth/fade state (shared with the main thread under frameMutex;
-	// the payload is tiny so one mutex for both channels is fine).
-	float latestStateFade = 0.0f;
-	ofPixels latestStateLights;
+	// the struct is tiny so one mutex for both channels is fine).
+	MouthState latestState;
 	bool haveState = false;
 
 	std::atomic<std::uint64_t> frameCount{0};

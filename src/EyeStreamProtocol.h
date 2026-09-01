@@ -33,9 +33,9 @@ constexpr std::uint8_t kFormatJpeg = 1;
 
 /// Magic of the mouth/fade state datagram ("MOUT").
 constexpr std::uint32_t kStateMagic = 0x4D4F5554;
-/// Sanity cap on lightsW * lightsH so a corrupt packet can't ask for huge
-/// buffers (the real grid is 14x1 today).
-constexpr int kMaxStateLights = 64;
+/// StatePacket.flags bit: the target edge fields are valid (the sender has a
+/// mouth loaded). Without it the receiver falls back to its local neutral.
+constexpr std::uint8_t kStateFlagHasTarget = 0x01;
 
 #pragma pack(push, 1)
 struct PacketHeader {
@@ -52,19 +52,24 @@ struct PacketHeader {
 	std::uint8_t format = kFormatRawRgb;
 };
 
-/// Header of the mouth/fade state datagram. Immediately followed by
-/// lightsW * lightsH * channels bytes of light-grid pixels (row-major, the
-/// CPU readback of the mouth's lights FBO). lightsW may be 0 when the sender
-/// has no mouth loaded; the fade value is still valid then.
+/// The mouth/fade state datagram: one fixed-size packet, no payload. The
+/// mouth is carried as the sender's QUANTIZED target edges (whole lights of
+/// the sender's grid, right edge exclusive) instead of baked pixels: the
+/// receiver owns the presentation (easing, neutral idle pose, rasterization)
+/// so its animation parameters can be tuned - and recorded targets replayed -
+/// without touching the sender. The fade applies to the EYES only; the mouth
+/// is always shown by the receiver.
 struct StatePacket {
 	std::uint32_t magic = kStateMagic;
 	std::uint32_t sessionId = 0; ///< Same id as the video stream of this run.
 	std::uint32_t sequence = 0;  ///< Monotonic per session; wrapping compare.
-	float fade = 0.0f;           ///< Shaped presence fade, 0..1.
-	std::uint8_t lightsW = 0;
-	std::uint8_t lightsH = 0;
-	std::uint8_t channels = 0; ///< Bytes per light (4 = RGBA).
-	std::uint8_t reserved[3] = {0, 0, 0};
+	float fade = 0.0f;           ///< Shaped presence fade for the eyes, 0..1.
+	std::uint8_t lightsW = 0;    ///< Sender's light-grid size (e.g. 14x1);
+	std::uint8_t lightsH = 0;    ///< 0 when the sender has no mouth loaded.
+	std::uint8_t flags = 0;      ///< kStateFlagHasTarget when edges are valid.
+	std::uint8_t reserved = 0;
+	float targetLeft = 0.0f;     ///< Target left edge in light units (integer-valued).
+	float targetRight = 0.0f;    ///< Target right edge, exclusive.
 };
 #pragma pack(pop)
 

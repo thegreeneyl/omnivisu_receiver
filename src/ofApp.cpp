@@ -56,9 +56,23 @@ void ofApp::setup() {
 	gradingPanel.setup(gradingGroup);
 	loadGradingParams();
 
+	// Mouth presentation: starts on its neutral pose, so the strip is
+	// visible immediately - before any packet and with no sender at all.
+	mouthDisplay.setup(mouthDisplayConfig());
+
 	if (!receiver.setup(config.getListenPort())) {
 		ofLogError("omnivisu_receiver") << "failed to start stream receiver";
 	}
+}
+
+//--------------------------------------------------------------
+MouthDisplay::Config ofApp::mouthDisplayConfig() const {
+	MouthDisplay::Config c;
+	c.lights = {config.getMouthLightsW(), config.getMouthLightsH()};
+	c.color = config.getMouthColor();
+	c.neutralWidth = config.getMouthNeutralWidth();
+	c.transitionSeconds = config.getMouthTransitionSeconds();
+	return c;
 }
 
 //--------------------------------------------------------------
@@ -200,6 +214,12 @@ void ofApp::reloadRuntimeConfig() {
 			<< "listen_port changed in config.json - restart to apply";
 	}
 
+	// Mouth presentation parameters (neutral_width, transition_seconds,
+	// color, grid) are runtime-tunable; the eased edges are kept so a reload
+	// never makes the mouth jump.
+	mouthDisplay.setup(mouthDisplayConfig());
+	warnedGridMismatch = false;
+
 	loadGradingParams();
 	ofLogNotice("omnivisu_receiver") << "config + grading reloaded";
 }
@@ -217,22 +237,22 @@ void ofApp::update() {
 	}
 
 	// Mouth/fade state: always take the latest (the fade must track live even
-	// when the light grid is unchanged). If the sender vanishes we simply keep
-	// the last state, mirroring the last-video-frame freeze.
-	if (receiver.getLatestState(stateFade, stateLights)) {
+	// when the target is unchanged). If the sender vanishes we keep the last
+	// state; the mouth drive below then falls back onto the neutral pose.
+	if (receiver.getLatestState(mouthState)) {
 		hasState = true;
-		if (stateLights.isAllocated() && stateLights.getWidth() > 0) {
-			if (!lightsTex.isAllocated()
-				|| lightsTex.getWidth() != stateLights.getWidth()
-				|| lightsTex.getHeight() != stateLights.getHeight()) {
-				lightsTex.allocate(stateLights);
-				// Hard LED cells, not a smear: nearest-neighbor upscale like
-				// the sender's debug strip.
-				lightsTex.setTextureMinMagFilter(GL_NEAREST, GL_NEAREST);
-			}
-			lightsTex.loadData(stateLights);
-		} else if (lightsTex.isAllocated()) {
-			lightsTex.clear();
+		// The packet's grid size is a sanity check against the local config
+		// (the target edges are in the SENDER's light units); a mismatch
+		// distorts the pose, so it is worth one loud log line.
+		if (mouthState.hasTarget && !warnedGridMismatch
+			&& (mouthState.lightsW != mouthDisplay.getGridSize().x
+				|| mouthState.lightsH != mouthDisplay.getGridSize().y)) {
+			warnedGridMismatch = true;
+			ofLogWarning("omnivisu_receiver")
+				<< "sender light grid " << mouthState.lightsW << "x" << mouthState.lightsH
+				<< " differs from local mouth.lights "
+				<< mouthDisplay.getGridSize().x << "x" << mouthDisplay.getGridSize().y
+				<< " - fix config.json so the grids match";
 		}
 	}
 
@@ -266,7 +286,7 @@ void ofApp::update() {
 
 	const float timeout = std::max(0.1f, config.getStreamTimeoutSeconds());
 	bool alive = lastStateTime >= 0.0f && (now - lastStateTime) < timeout;
-	if (alive && hasState && stateFade > 0.05f
+	if (alive && hasState && mouthState.fade > 0.05f
 		&& (lastVideoTime < 0.0f || now - lastVideoTime > timeout)) {
 		alive = false;
 	}
@@ -288,15 +308,27 @@ void ofApp::update() {
 		linkFade = (fadeOut > 1e-4f) ? std::max(0.0f, linkFade - dt / fadeOut) : 0.0f;
 	}
 
+	// Drive the mouth: the live target while the stream is alive and the
+	// packet carries one, the local neutral pose otherwise (timeout, before
+	// the first packet, or fade-only packets from a sender without a mouth).
+	// The mouth itself is never faded - it eases between poses instead.
+	if (streamAlive && hasState && mouthState.hasTarget) {
+		mouthDisplay.setTarget(mouthState.targetLeft, mouthState.targetRight);
+	} else {
+		mouthDisplay.setIdle();
+	}
+	mouthDisplay.update(dt);
+
 	if (now - lastLogTime >= 2.0f) {
 		ofLogNotice("omnivisu_receiver") << "render_fps=" << ofToString(ofGetFrameRate(), 1)
 			<< " recv_fps=" << ofToString(receivedFps, 1)
 			<< " frames=" << receiver.getFrameCount()
 			<< " dropped=" << receiver.getDroppedCount()
 			<< " states=" << receiver.getStateCount()
-			<< " fade=" << ofToString(stateFade, 2)
+			<< " fade=" << ofToString(mouthState.fade, 2)
 			<< (applyFade ? "" : " (not applied)")
 			<< " link=" << ofToString(linkFade, 2)
+			<< " mouth=" << (mouthDisplay.isIdle() ? "idle" : "live")
 			<< (streamAlive ? "" : " (stream lost)");
 		lastLogTime = now;
 	}
@@ -320,8 +352,10 @@ void ofApp::draw() {
 
 	// Effective fade: received presence fade times the local link fade. 'a'
 	// only disables the *received* part (to inspect the raw stream); the link
-	// fade always applies so a dead sender never leaves a frozen frame.
-	const float remoteFade = (applyFade && hasState) ? stateFade : 1.0f;
+	// fade always applies so a dead sender never leaves a frozen frame. The
+	// fade darkens the EYES only - the mouth strip below stays fully visible
+	// and eases to its neutral pose instead.
+	const float remoteFade = (applyFade && hasState) ? mouthState.fade : 1.0f;
 	const float effectiveFade = remoteFade * linkFade;
 
 	// Compose the LED content at full LED resolution in the FBO, then draw it
@@ -377,19 +411,19 @@ void ofApp::draw() {
 	const float textY = stripY + bandH + 24.0f; // status row baseline
 	const float noticeY = textY + 20.0f;        // notices row baseline
 
-	// Mouth strip: the sender's LED grid upscaled nearest-neighbor with cell
-	// ticks. The lights are dimmed by the effective fade so the strip shows
-	// what the building's mouth actually does; the frame stays visible.
-	if (bandH > 0.0f && lightsTex.isAllocated() && lightsTex.getWidth() > 0) {
+	// Mouth strip: the receiver-side mouth (eased live target or the neutral
+	// idle pose) upscaled nearest-neighbor with cell ticks. NEVER dimmed by
+	// the fades: the mouth must always be present on the building; with no
+	// data it shows the neutral pose instead of disappearing.
+	if (bandH > 0.0f && mouthDisplay.isAllocated()) {
 		const float stripX = pad;
 		const float stripW = ledW - 2.0f * pad;
 		const float stripH = std::max(1.0f, bandH - 2.0f * pad);
-		const int cells = static_cast<int>(lightsTex.getWidth());
+		const int cells = mouthDisplay.getGridSize().x;
 
+		mouthDisplay.draw(stripX, stripY, stripW, stripH);
 		ofPushStyle();
 		ofEnableAlphaBlending();
-		ofSetColor(static_cast<int>(255.0f * effectiveFade));
-		lightsTex.draw(stripX, stripY, stripW, stripH);
 		ofNoFill();
 		ofSetColor(90);
 		const float cellPx = stripW / static_cast<float>(cells);
@@ -408,9 +442,10 @@ void ofApp::draw() {
 			<< " | render " << ofToString(ofGetFrameRate(), 1)
 			<< " | frames " << receiver.getFrameCount()
 			<< " | dropped " << receiver.getDroppedCount()
-			<< " | fade " << (hasState ? ofToString(stateFade, 2) : std::string("--"))
+			<< " | fade " << (hasState ? ofToString(mouthState.fade, 2) : std::string("--"))
 			<< " (" << (applyFade ? "applied" : "off") << ")"
 			<< " | link " << ofToString(linkFade, 2)
+			<< " | mouth " << (mouthDisplay.isIdle() ? "idle" : "live")
 			<< (streamAlive ? "" : " (lost)");
 
 		const float textX = pad;

@@ -55,6 +55,27 @@ bool ReceiverConfig::load(const std::string & path) {
 		fadeOutSeconds = r.value("fade_out_seconds", fadeOutSeconds);
 	}
 
+	// Mouth presentation: the receiver owns easing + the neutral idle pose
+	// (the wire only carries target edges), so these are receiver-side knobs.
+	if (json.contains("mouth")) {
+		const auto & m = json["mouth"];
+		if (m.contains("lights")) {
+			const auto & l = m["lights"];
+			mouthLightsW = std::max(1, l.value("w", mouthLightsW));
+			mouthLightsH = std::max(1, l.value("h", mouthLightsH));
+		}
+		if (m.contains("color")) {
+			const auto & c = m["color"];
+			mouthColor.r = static_cast<int>(ofClamp(c.value("r", static_cast<int>(mouthColor.r)), 0, 255));
+			mouthColor.g = static_cast<int>(ofClamp(c.value("g", static_cast<int>(mouthColor.g)), 0, 255));
+			mouthColor.b = static_cast<int>(ofClamp(c.value("b", static_cast<int>(mouthColor.b)), 0, 255));
+			mouthColor.a = static_cast<int>(ofClamp(c.value("a", static_cast<int>(mouthColor.a)), 0, 255));
+		}
+		mouthNeutralWidth = std::max(1, m.value("neutral_width", mouthNeutralWidth));
+		mouthTransitionSeconds = std::max(0.0f,
+			m.value("transition_seconds", mouthTransitionSeconds));
+	}
+
 	loaded = true;
 	const char * modeName = windowMode == WindowMode::Fullscreen ? "fullscreen"
 		: windowMode == WindowMode::Borderless ? "borderless"

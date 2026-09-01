@@ -51,6 +51,20 @@ public:
 	float getFadeInSeconds() const { return fadeInSeconds; }
 	float getFadeOutSeconds() const { return fadeOutSeconds; }
 
+	// --- mouth presentation (config "mouth" block) ---
+	// The wire only carries target edges; these parameters shape how the
+	// receiver animates and idles the mouth, reloadable at runtime ('r').
+	/// Light grid the mouth is rasterized into; must match the sender's grid
+	/// (the packet's lightsW/H is checked against it and logged on mismatch).
+	int getMouthLightsW() const { return mouthLightsW; }
+	int getMouthLightsH() const { return mouthLightsH; }
+	ofColor getMouthColor() const { return mouthColor; }
+	/// Width (in lights) of the neutral idle pose, shown centered whenever no
+	/// live target exists (timeout, startup, fade-only packets).
+	int getMouthNeutralWidth() const { return mouthNeutralWidth; }
+	/// Ease duration toward a new target (~95% done after this time).
+	float getMouthTransitionSeconds() const { return mouthTransitionSeconds; }
+
 private:
 	int listenPort = 12345;
 	int width = 828;
@@ -66,5 +80,10 @@ private:
 	float streamTimeoutSeconds = 1.0f;
 	float fadeInSeconds = 0.5f;
 	float fadeOutSeconds = 2.0f;
+	int mouthLightsW = 14;
+	int mouthLightsH = 1;
+	ofColor mouthColor{255, 255, 255, 180};
+	int mouthNeutralWidth = 6;
+	float mouthTransitionSeconds = 0.2f;
 	bool loaded = false;
 };

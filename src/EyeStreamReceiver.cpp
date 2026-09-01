@@ -2,6 +2,7 @@
 
 #include "EyeStreamProtocol.h"
 
+#include <cmath>
 #include <cstring>
 
 namespace {
@@ -65,13 +66,12 @@ bool EyeStreamReceiver::getLatestFrame(ofPixels & out) {
 }
 
 //--------------------------------------------------------------
-bool EyeStreamReceiver::getLatestState(float & fade, ofPixels & lights) {
+bool EyeStreamReceiver::getLatestState(MouthState & out) {
 	std::lock_guard<std::mutex> lk(frameMutex);
 	if (!haveState) {
 		return false;
 	}
-	fade = latestStateFade;
-	lights = latestStateLights;
+	out = latestState;
 	return true;
 }
 
@@ -116,25 +116,17 @@ void EyeStreamReceiver::threadedFunction() {
 		}
 
 		// Demux on the magic BEFORE the video-header size gate: the state
-		// datagram (22-byte header + tiny payload) can be shorter than a
+		// datagram (one fixed-size header, no payload) can be shorter than a
 		// video PacketHeader.
 		std::uint32_t magic = 0;
 		std::memcpy(&magic, recvBuf.data(), sizeof(magic));
 
 		if (magic == eyestream::kStateMagic) {
-			if (n < eyestream::kStateHeaderBytes) {
-				continue;
+			if (n != eyestream::kStateHeaderBytes) {
+				continue; // wrong size: corrupt or an old-protocol packet
 			}
 			eyestream::StatePacket sp;
 			std::memcpy(&sp, recvBuf.data(), eyestream::kStateHeaderBytes);
-			const int lightCount = static_cast<int>(sp.lightsW) * sp.lightsH;
-			if (lightCount > eyestream::kMaxStateLights) {
-				continue;
-			}
-			const int expectedPayload = lightCount * sp.channels;
-			if (n != eyestream::kStateHeaderBytes + expectedPayload) {
-				continue;
-			}
 			// New sender run: its sequence restarts at 0, so drop ordering
 			// state (same rationale as the video sessionId reset below).
 			if (!haveStateSession || sp.sessionId != stateSessionId) {
@@ -149,18 +141,22 @@ void EyeStreamReceiver::threadedFunction() {
 			haveStateSeq = true;
 			lastStateSeq = sp.sequence;
 
+			// The target flag only counts with a plausible grid and finite,
+			// ordered edges; anything else degrades to a fade-only state and
+			// the main thread falls back to its local neutral pose.
+			const bool hasTarget = (sp.flags & eyestream::kStateFlagHasTarget) != 0
+				&& sp.lightsW > 0 && sp.lightsH > 0
+				&& std::isfinite(sp.targetLeft) && std::isfinite(sp.targetRight)
+				&& sp.targetRight >= sp.targetLeft;
+
 			{
 				std::lock_guard<std::mutex> lk(frameMutex);
-				latestStateFade = std::min(1.0f, std::max(0.0f, sp.fade));
-				if (lightCount > 0 && (sp.channels == 3 || sp.channels == 4)) {
-					latestStateLights.setFromPixels(
-						reinterpret_cast<const unsigned char *>(
-							recvBuf.data() + eyestream::kStateHeaderBytes),
-						sp.lightsW, sp.lightsH,
-						sp.channels == 4 ? OF_PIXELS_RGBA : OF_PIXELS_RGB);
-				} else {
-					latestStateLights.clear();
-				}
+				latestState.fade = std::min(1.0f, std::max(0.0f, sp.fade));
+				latestState.hasTarget = hasTarget;
+				latestState.lightsW = sp.lightsW;
+				latestState.lightsH = sp.lightsH;
+				latestState.targetLeft = sp.targetLeft;
+				latestState.targetRight = sp.targetRight;
 				haveState = true;
 			}
 			stateCount.fetch_add(1);

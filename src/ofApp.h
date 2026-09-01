@@ -4,6 +4,7 @@
 #include "ofxGui.h"
 #include "ReceiverConfig.h"
 #include "EyeStreamReceiver.h"
+#include "MouthDisplay.h"
 
 class ofApp : public ofBaseApp {
 public:
@@ -36,15 +37,20 @@ private:
 	float lastLogTime = 0.0f;
 
 	// Latest mouth/fade state from the "MOUT" datagrams (same UDP port as
-	// the video). The lights texture is the sender's LED grid (e.g. 14x1),
-	// drawn nearest-neighbor as a strip below the eyes.
+	// the video): the eyes' presence fade plus the sender's quantized mouth
+	// target edges (light units of its grid).
 	bool hasState = false;
-	float stateFade = 0.0f;
-	ofPixels stateLights;
-	ofTexture lightsTex;
-	// Whether the received fade darkens the rendered eyes + mouth ('a'
-	// toggles at runtime; initial value from config). The numeric fade in
-	// the info bar stays visible either way so the link can be verified.
+	EyeStreamReceiver::MouthState mouthState;
+	// Receiver-side mouth presentation: eases toward the live target while
+	// the stream is alive, and toward the local neutral pose otherwise
+	// (timeout, startup, fade-only packets). Drawn as a strip below the
+	// eyes, ALWAYS at full opacity - the mouth is exempt from both fades by
+	// design, so it never disappears.
+	MouthDisplay mouthDisplay;
+	bool warnedGridMismatch = false; ///< One-shot sender/local grid-size warning.
+	// Whether the received fade darkens the rendered eyes ('a' toggles at
+	// runtime; initial value from config). The numeric fade in the info bar
+	// stays visible either way so the link can be verified.
 	bool applyFade = true;
 
 	// Measured rate of fully-received frames (the actual stream rate), sampled
@@ -88,6 +94,8 @@ private:
 
 	bool buildGradeShader(bool useRect);
 	void allocateLedFbo();
+	/// Assembles the MouthDisplay parameters from the "mouth" config block.
+	MouthDisplay::Config mouthDisplayConfig() const;
 	bool loadGradingParams();
 	bool saveGradingParams();
 	/// Re-reads config.json for the runtime-safe values (fades, timeout,
