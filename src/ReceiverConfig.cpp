@@ -82,10 +82,23 @@ bool ReceiverConfig::load(const std::string & path) {
 			m.value("transition_seconds", mouthTransitionSeconds));
 	}
 
+	// Eye lights on the same fixture: placement of the two blocks whose
+	// brightness runs inverse to the camera-image fade.
+	if (json.contains("eyes")) {
+		const auto & e = json["eyes"];
+		eyeRow = e.value("row", eyeRow);
+		eyeOffset = e.value("offset", eyeOffset);
+		eyeSpan = e.value("span", eyeSpan);
+	}
+
 	mouthRow = std::clamp(mouthRow, 0, mouthLightsH - 1);
 	mouthOffset = std::clamp(mouthOffset, 0, mouthLightsW - 1);
 	mouthSpan = std::clamp(mouthSpan, 1, mouthLightsW - mouthOffset);
 	mouthNeutralWidth = std::clamp(mouthNeutralWidth, 1, mouthSpan);
+	eyeRow = std::clamp(eyeRow, 0, mouthLightsH - 1);
+	eyeOffset = std::clamp(eyeOffset, 0, mouthLightsW - 1);
+	eyeSpan = std::clamp(eyeSpan, 1,
+		std::max(1, (mouthLightsW - 2 * eyeOffset) / 2));
 
 	loaded = true;
 	const char * modeName = windowMode == WindowMode::Fullscreen ? "fullscreen"
@@ -99,6 +112,8 @@ bool ReceiverConfig::load(const std::string & path) {
 		<< ", scale=" << scale
 		<< ", mouth=" << mouthLightsW << "x" << mouthLightsH
 		<< " row=" << mouthRow << " offset=" << mouthOffset
-		<< " span=" << mouthSpan << ")";
+		<< " span=" << mouthSpan
+		<< ", eyes row=" << eyeRow << " offset=" << eyeOffset
+		<< " span=" << eyeSpan << ")";
 	return true;
 }

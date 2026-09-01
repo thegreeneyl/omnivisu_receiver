@@ -23,5 +23,10 @@
         "color": { "r": 255, "g": 255, "b": 255, "a": 255 },
         "neutral_width": 6,
         "transition_seconds": 0.2
+    },
+    "eyes": {
+        "row": 1,
+        "offset": 2,
+        "span": 3
     }
 }

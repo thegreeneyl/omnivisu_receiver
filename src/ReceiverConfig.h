@@ -65,6 +65,12 @@ public:
 	/// Mouth width in lights; this is the sender's coordinate space. The
 	/// packet's lightsW/H is checked against (span, 1) and logged on mismatch.
 	int getMouthSpan() const { return mouthSpan; }
+	/// Eye-light row on the fixture, 0-based from the top (1 = 2nd line).
+	int getEyeRow() const { return eyeRow; }
+	/// Eye block inset from EACH edge of the fixture.
+	int getEyeOffset() const { return eyeOffset; }
+	/// Width of each eye block in lights.
+	int getEyeSpan() const { return eyeSpan; }
 	ofColor getMouthColor() const { return mouthColor; }
 	/// Width (in lights) of the neutral idle pose, shown centered on the
 	/// mouth span whenever no live target exists (timeout, startup, fade-only
@@ -93,6 +99,9 @@ private:
 	int mouthRow = 3;
 	int mouthOffset = 2;
 	int mouthSpan = 14;
+	int eyeRow = 1;
+	int eyeOffset = 2;
+	int eyeSpan = 3;
 	ofColor mouthColor{255, 255, 255, 255};
 	int mouthNeutralWidth = 6;
 	float mouthTransitionSeconds = 0.2f;

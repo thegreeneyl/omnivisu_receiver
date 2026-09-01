@@ -19,6 +19,12 @@
 /// a fully covered mouth cell is opaque RGB white, not a transparent overlay.
 /// Edge lights still get fractional brightness via supersampled area-average,
 /// which reads as lights handing over.
+///
+/// The fixture also carries the EYE lights: two blocks on the 2nd row from the
+/// top (row index 1), eyeSpan cells each, inset eyeOffset cells from the left
+/// and right edges. Their brightness is the INVERSE of the camera-image fade
+/// (set per frame via setEyeIntensity): a fully faded-out image lights the
+/// eyes fully, a fully visible image turns them off.
 class MouthDisplay {
 public:
 	struct Config {
@@ -26,7 +32,10 @@ public:
 		int row = 3;                       ///< Mouth row, 0-based from the top (3 = 4th).
 		int offset = 2;                    ///< Mouth column inset from the left edge.
 		int span = 14;                     ///< Mouth width in lights; matches the sender.
-		ofColor color{255, 255, 255, 255}; ///< Fully-on mouth RGB (alpha ignored).
+		int eyeRow = 1;                    ///< Eye row, 0-based from the top (1 = 2nd).
+		int eyeOffset = 2;                 ///< Eye block inset from EACH edge.
+		int eyeSpan = 3;                   ///< Width of each eye block in lights.
+		ofColor color{255, 255, 255, 255}; ///< Fully-on light RGB (alpha ignored).
 		int neutralWidth = 6;              ///< Idle width in lights (>= 1), within the span.
 		float transitionSeconds = 0.2f;    ///< Ease duration toward a target (~95%).
 	};
@@ -49,6 +58,11 @@ public:
 	/// timeout, no packet yet, or a fade-only packet from a sender without a
 	/// mouth.
 	void setIdle();
+
+	/// Sets the eye-light brightness [0..1] for this frame. Callers pass the
+	/// INVERSE of the effective camera-image fade: faded-out image -> eyes
+	/// fully lit, fully visible image -> eyes off.
+	void setEyeIntensity(float intensity);
 
 	/// Eases the current edges toward the target and re-rasterizes the grid.
 	void update(float dt);
@@ -80,6 +94,7 @@ private:
 	float targetRight = 1.0f;
 	float currentLeft = 0.0f; ///< Eased edges the rasterizer draws.
 	float currentRight = 1.0f;
+	float eyeIntensity = 0.0f; ///< Eye-light brightness [0..1], inverse of the fade.
 
 	/// Supersampling factor (same rationale as the sender's Mouth): the bar
 	/// is drawn at lights * kSupersample and averaged down so partially

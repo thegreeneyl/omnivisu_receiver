@@ -72,6 +72,9 @@ MouthDisplay::Config ofApp::mouthDisplayConfig() const {
 	c.row = config.getMouthRow();
 	c.offset = config.getMouthOffset();
 	c.span = config.getMouthSpan();
+	c.eyeRow = config.getEyeRow();
+	c.eyeOffset = config.getEyeOffset();
+	c.eyeSpan = config.getEyeSpan();
 	c.color = config.getMouthColor();
 	c.neutralWidth = config.getMouthNeutralWidth();
 	c.transitionSeconds = config.getMouthTransitionSeconds();
@@ -320,6 +323,11 @@ void ofApp::update() {
 	} else {
 		mouthDisplay.setIdle();
 	}
+	// Eye lights run INVERSE to the effective camera-image fade (same value
+	// draw() darkens the eyes with): image faded to black -> eye lights fully
+	// on; image fully visible -> eye lights off.
+	const float remoteFade = (applyFade && hasState) ? mouthState.fade : 1.0f;
+	mouthDisplay.setEyeIntensity(1.0f - remoteFade * linkFade);
 	mouthDisplay.update(dt);
 
 	if (now - lastLogTime >= 2.0f) {

@@ -11,6 +11,11 @@ void MouthDisplay::setup(const Config & c) {
 	cfg.row = std::clamp(cfg.row, 0, cfg.lights.y - 1);
 	cfg.offset = std::clamp(cfg.offset, 0, cfg.lights.x - 1);
 	cfg.span = std::clamp(cfg.span, 1, cfg.lights.x - cfg.offset);
+	cfg.eyeRow = std::clamp(cfg.eyeRow, 0, cfg.lights.y - 1);
+	cfg.eyeOffset = std::clamp(cfg.eyeOffset, 0, cfg.lights.x - 1);
+	// Both eye blocks (inset from each edge) must fit the grid side by side.
+	cfg.eyeSpan = std::clamp(cfg.eyeSpan, 1,
+		std::max(1, (cfg.lights.x - 2 * cfg.eyeOffset) / 2));
 	// Never below 1 light: the mouth must always show something.
 	cfg.neutralWidth = std::clamp(cfg.neutralWidth, 1, cfg.span);
 	cfg.transitionSeconds = std::max(0.0f, cfg.transitionSeconds);
@@ -36,6 +41,8 @@ void MouthDisplay::setup(const Config & c) {
 	ofLogNotice("MouthDisplay") << "setup: fixture " << cfg.lights.x << "x"
 		<< cfg.lights.y << ", mouth row " << cfg.row
 		<< " offset " << cfg.offset << " span " << cfg.span
+		<< ", eyes row " << cfg.eyeRow << " offset " << cfg.eyeOffset
+		<< " span " << cfg.eyeSpan
 		<< ", neutral_width " << cfg.neutralWidth
 		<< ", transition " << cfg.transitionSeconds << "s";
 }
@@ -68,6 +75,11 @@ void MouthDisplay::setTarget(float left, float right) {
 void MouthDisplay::setIdle() {
 	computeIdleEdges(targetLeft, targetRight);
 	idle = true;
+}
+
+//--------------------------------------------------------------
+void MouthDisplay::setEyeIntensity(float intensity) {
+	eyeIntensity = ofClamp(intensity, 0.0f, 1.0f);
 }
 
 //--------------------------------------------------------------
@@ -190,6 +202,22 @@ void MouthDisplay::renderLights() {
 	ofFill();
 	ofSetColor(cfg.color.r, cfg.color.g, cfg.color.b, 255);
 	ofDrawRectangle(leftPx, topPx, rightPx - leftPx, rowH);
+
+	// Eye lights: two blocks on the eye row, inset from each edge, at the
+	// intensity fed via setEyeIntensity (the inverse of the camera fade).
+	// Scaling the RGB directly keeps the raster opaque like the mouth.
+	if (eyeIntensity > 0.0f) {
+		ofSetColor(static_cast<int>(cfg.color.r * eyeIntensity),
+			static_cast<int>(cfg.color.g * eyeIntensity),
+			static_cast<int>(cfg.color.b * eyeIntensity), 255);
+		const float eyeTopPx = ofClamp(static_cast<float>(cfg.eyeRow) * ss, 0.0f, ssH);
+		const float eyeRowH = std::min(ss, ssH - eyeTopPx);
+		const float eyeW = static_cast<float>(cfg.eyeSpan) * ss;
+		const float leftEyeX = static_cast<float>(cfg.eyeOffset) * ss;
+		const float rightEyeX = ssW - static_cast<float>(cfg.eyeOffset) * ss - eyeW;
+		ofDrawRectangle(leftEyeX, eyeTopPx, eyeW, eyeRowH);
+		ofDrawRectangle(rightEyeX, eyeTopPx, eyeW, eyeRowH);
+	}
 	ofPopStyle();
 	lightsSsFbo.end();
 
