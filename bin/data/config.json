@@ -15,6 +15,19 @@
         "fade_in_seconds": 0.5,
         "fade_out_seconds": 1.0
     },
+    "storage": {
+        "temp_dir": "recordings/tmp",
+        "permanent_dir": "recordings/permanent",
+        "immediate_playback": true,
+        "permanent_storage": false,
+        "min_free_gb": 10.0
+    },
+    "archive_playback": {
+        "enabled": false,
+        "order": "latest_first",
+        "pause_seconds": 8.0,
+        "pause_random_seconds": 2.0
+    },
     "mouth": {
         "lights": { "w": 18, "h": 5 },
         "row": 3,
@@ -30,7 +43,7 @@
         "span": 3
     },
     "artnet": {
-        "enabled": false,
+        "enabled": true,
         "ip": "192.168.178.223",
         "port": 6454,
         "universes": [0, 1],

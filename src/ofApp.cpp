@@ -62,9 +62,24 @@ void ofApp::setup() {
 
 	artnet.setup(artnetConfig());
 
+	// Recording/playback workers. The temp slots are wiped at startup (a
+	// leftover from a crashed run is not resumable) and the receiver gets its
+	// recording sink before the UDP thread starts.
+	recorder.start();
+	recorder.discard(tempSlotDir(0));
+	recorder.discard(tempSlotDir(1));
+	player.start();
+	receiver.setRecorder(&recorder);
+
 	if (!receiver.setup(config.getListenPort())) {
 		ofLogError("omnivisu_receiver") << "failed to start stream receiver";
 	}
+}
+
+//--------------------------------------------------------------
+std::string ofApp::tempSlotDir(int slot) const {
+	const std::string base = ofToDataPath(config.getStorageTempDir(), true);
+	return base + (slot == 0 ? "/a" : "/b");
 }
 
 //--------------------------------------------------------------
@@ -250,16 +265,23 @@ void ofApp::reloadRuntimeConfig() {
 }
 
 //--------------------------------------------------------------
-void ofApp::update() {
-	if (receiver.getLatestFrame(framePixels) && framePixels.isAllocated()) {
-		if (!frameTex.isAllocated()
-			|| frameTex.getWidth() != framePixels.getWidth()
-			|| frameTex.getHeight() != framePixels.getHeight()) {
-			frameTex.allocate(framePixels);
-		}
-		frameTex.loadData(framePixels);
-		hasFrame = true;
+void ofApp::uploadFrame() {
+	if (!frameTex.isAllocated()
+		|| frameTex.getWidth() != framePixels.getWidth()
+		|| frameTex.getHeight() != framePixels.getHeight()) {
+		frameTex.allocate(framePixels);
 	}
+	frameTex.loadData(framePixels);
+	hasFrame = true;
+}
+
+//--------------------------------------------------------------
+void ofApp::update() {
+	// Live frames are ALWAYS consumed (the receiver hands them out once) so a
+	// source switch never finds a stale one; they are only uploaded to the
+	// texture further down when live content is actually on screen.
+	const bool liveFrameNew = receiver.getLatestFrame(framePixels)
+		&& framePixels.isAllocated();
 
 	// Mouth/fade state: always take the latest (the fade must track live even
 	// when the target is unchanged). If the sender vanishes we keep the last
@@ -318,35 +340,160 @@ void ofApp::update() {
 	if (alive != streamAlive) {
 		streamAlive = alive;
 		ofLogNotice("omnivisu_receiver")
-			<< "stream " << (streamAlive ? "alive" : "lost")
-			<< " (fading " << (streamAlive ? "in" : "out") << ")";
+			<< "stream " << (streamAlive ? "alive" : "lost");
 	}
 
-	// Ramp the local link fade toward the liveness target. dt is clamped so a
-	// long hitch (window drag, debugger pause) can't jump the fade.
+	// A camera STREAM is video presence: completed frames within the timeout.
+	// The heartbeat above only says "sender process is up"; video starting and
+	// stopping is what bounds a recording and what wins over any playback.
+	videoPresent = lastVideoTime >= 0.0f && (now - lastVideoTime) < timeout;
+
+	// --- recording control (independent of what is on screen) ---
+	// Every video presence is captured; the ping-pong slot keeps the folder a
+	// still-running playback reads from untouched.
+	if (videoPresent && !recordingActive) {
+		recordSlot = 1 - recordSlot;
+		activeRecordingId = recorder.startRecording(tempSlotDir(recordSlot));
+		recordingActive = true;
+		ofLogNotice("omnivisu_receiver") << "camera stream started - recording to slot "
+			<< (recordSlot == 0 ? "a" : "b");
+	} else if (!videoPresent && recordingActive) {
+		recorder.finalizeRecording();
+		recordingActive = false;
+		tempNeedsResolve = true;
+		ofLogNotice("omnivisu_receiver") << "camera stream ended - finalizing recording";
+	}
+
+	// --- display-source state machine ---
+	// Live always wins; switches are sequential through black (fade out the
+	// old source, swap at fade 0, fade the new one in).
+	switch (mode) {
+	case Mode::Idle:
+		if (videoPresent) {
+			mode = Mode::Live;
+		} else if (config.getArchivePlaybackEnabled()) {
+			enterIdle(now); // moves to ArchiveWait with a scheduled start
+		}
+		break;
+
+	case Mode::ArchiveWait:
+		if (videoPresent) {
+			mode = Mode::Live;
+		} else if (!config.getArchivePlaybackEnabled()) {
+			mode = Mode::Idle;
+		} else if (archiveNextTime >= 0.0f && now >= archiveNextTime) {
+			const std::string clip = pickArchiveClip();
+			if (!clip.empty()) {
+				startPlayback(clip, Mode::PlayArchive);
+			} else {
+				scheduleArchivePlay(now); // archive empty: retry after a pause
+			}
+		}
+		break;
+
+	case Mode::Live:
+		if (!videoPresent) {
+			mode = Mode::LiveEnded; // finalize is already queued above
+		}
+		break;
+
+	case Mode::LiveEnded: {
+		if (videoPresent) {
+			// The person came back before we settled: the previous clip will
+			// never be played, so resolve it (promote/discard) right away.
+			resolveFinishedRecording();
+			mode = Mode::Live;
+			break;
+		}
+		if (linkFade > 0.0f) {
+			break; // still fading out the frozen last live frame
+		}
+		StreamRecorder::Result res;
+		if (!recorder.getResult(activeRecordingId, res)) {
+			break; // writer still flushing the tail; stay black meanwhile
+		}
+		tempResult = res;
+		if (res.frameCount > 0 && config.getImmediatePlayback()) {
+			startPlayback(res.dir, Mode::PlayTemp);
+		} else {
+			resolveFinishedRecording();
+			enterIdle(now);
+		}
+		break;
+	}
+
+	case Mode::PlayTemp:
+	case Mode::PlayArchive: {
+		const auto st = player.getStatus();
+		const bool wantExit = videoPresent
+			|| st == StreamPlayer::Status::Finished
+			|| st == StreamPlayer::Status::Idle;
+		if (wantExit && linkFade <= 0.0f) {
+			exitPlayback(now);
+		}
+		break;
+	}
+	}
+
+	// --- source plumbing: frames + state of whatever is on screen ---
+	const bool playbackMode = (mode == Mode::PlayTemp || mode == Mode::PlayArchive);
+	if (playbackMode) {
+		if (player.getLatestFrame(framePixels) && framePixels.isAllocated()) {
+			uploadFrame();
+		}
+		if (player.getLatestState(playState)) {
+			hasPlayState = true;
+		}
+	} else if (liveFrameNew) {
+		uploadFrame();
+	}
+
+	// Fade target: 1 while the current source should be visible, 0 while
+	// idle, waiting, or fading out toward a source switch (videoPresent
+	// during playback = live wants the screen).
+	float fadeTarget = 0.0f;
+	if (mode == Mode::Live) {
+		fadeTarget = 1.0f;
+	} else if (playbackMode) {
+		fadeTarget = (!videoPresent && player.getStatus() == StreamPlayer::Status::Playing)
+			? 1.0f : 0.0f;
+	}
+
+	// Ramp the local link fade toward the target. dt is clamped so a long
+	// hitch (window drag, debugger pause) can't jump the fade.
 	const float dt = std::min(0.1f, static_cast<float>(ofGetLastFrameTime()));
-	if (streamAlive) {
+	if (fadeTarget > linkFade) {
 		const float fadeIn = config.getFadeInSeconds();
-		linkFade = (fadeIn > 1e-4f) ? std::min(1.0f, linkFade + dt / fadeIn) : 1.0f;
-	} else {
+		linkFade = (fadeIn > 1e-4f) ? std::min(fadeTarget, linkFade + dt / fadeIn) : fadeTarget;
+	} else if (fadeTarget < linkFade) {
 		const float fadeOut = config.getFadeOutSeconds();
-		linkFade = (fadeOut > 1e-4f) ? std::max(0.0f, linkFade - dt / fadeOut) : 0.0f;
+		linkFade = (fadeOut > 1e-4f) ? std::max(fadeTarget, linkFade - dt / fadeOut) : fadeTarget;
 	}
 
-	// Drive the mouth: the live target while the stream is alive and the
-	// packet carries one, the local neutral pose otherwise (timeout, before
-	// the first packet, or fade-only packets from a sender without a mouth).
-	// The mouth itself is never faded - it eases between poses instead.
-	if (streamAlive && hasState && mouthState.hasTarget) {
-		mouthDisplay.setTarget(mouthState.targetLeft, mouthState.targetRight);
+	// Drive the mouth from the active source: replayed timeline states during
+	// playback, the live target while the stream is alive, and the local
+	// neutral pose otherwise. The mouth itself is never faded - it eases
+	// between poses instead.
+	if (playbackMode) {
+		if (player.getStatus() == StreamPlayer::Status::Playing
+			&& hasPlayState && playState.hasTarget) {
+			mouthDisplay.setTarget(playState.targetLeft, playState.targetRight);
+		} else {
+			mouthDisplay.setIdle();
+		}
+		activeRemoteFade = (applyFade && hasPlayState) ? playState.fade : 1.0f;
 	} else {
-		mouthDisplay.setIdle();
+		if (streamAlive && hasState && mouthState.hasTarget) {
+			mouthDisplay.setTarget(mouthState.targetLeft, mouthState.targetRight);
+		} else {
+			mouthDisplay.setIdle();
+		}
+		activeRemoteFade = (applyFade && hasState) ? mouthState.fade : 1.0f;
 	}
 	// Eye lights run INVERSE to the effective camera-image fade (same value
 	// draw() darkens the eyes with): image faded to black -> eye lights fully
 	// on; image fully visible -> eye lights off.
-	const float remoteFade = (applyFade && hasState) ? mouthState.fade : 1.0f;
-	mouthDisplay.setEyeIntensity(1.0f - remoteFade * linkFade);
+	mouthDisplay.setEyeIntensity(1.0f - activeRemoteFade * linkFade);
 	mouthDisplay.update(dt);
 
 	// Ship the freshly rasterized fixture grid to the lights. Same frame to
@@ -361,15 +508,149 @@ void ofApp::update() {
 			<< " frames=" << receiver.getFrameCount()
 			<< " dropped=" << receiver.getDroppedCount()
 			<< " states=" << receiver.getStateCount()
-			<< " fade=" << ofToString(mouthState.fade, 2)
+			<< " fade=" << ofToString(activeRemoteFade, 2)
 			<< (applyFade ? "" : " (not applied)")
 			<< " link=" << ofToString(linkFade, 2)
+			<< " mode=" << modeName()
+			<< (recordingActive ? (recordSlot == 0 ? " rec=a" : " rec=b") : "")
 			<< " mouth=" << (mouthDisplay.isIdle() ? "idle" : "live")
 			<< " artnet=" << (artnet.isEnabled()
 				? ofToString(artnet.getPacketCount()) : std::string("off"))
+			<< (recorder.getDroppedItems() > 0
+				? " rec_dropped=" + ofToString(recorder.getDroppedItems()) : std::string())
 			<< (streamAlive ? "" : " (stream lost)");
 		lastLogTime = now;
 	}
+}
+
+//--------------------------------------------------------------
+void ofApp::resolveFinishedRecording() {
+	if (!tempNeedsResolve) {
+		return;
+	}
+	tempNeedsResolve = false;
+	// The recorder's ordered queue guarantees this acts on the recording
+	// finalized before it - even if a new one has already started behind it.
+	recorder.resolveLastRecording(config.getPermanentStorage(),
+		ofToDataPath(config.getStoragePermanentDir(), true),
+		static_cast<double>(config.getMinFreeGb()));
+}
+
+//--------------------------------------------------------------
+void ofApp::startPlayback(const std::string & dir, Mode playMode) {
+	player.startPlayback(dir);
+	playingDir = dir;
+	hasPlayState = false;
+	hasFrame = false; // stay black until the first replayed frame arrives
+	mode = playMode;
+	ofLogNotice("omnivisu_receiver")
+		<< (playMode == Mode::PlayTemp ? "immediate replay: " : "archive playback: ")
+		<< dir;
+}
+
+//--------------------------------------------------------------
+void ofApp::exitPlayback(float now) {
+	player.stopPlayback();
+	if (mode == Mode::PlayTemp) {
+		// The replayed clip is done (or was interrupted by a new stream):
+		// promote or discard it now, before its slot can be reused. Remember
+		// it as "just played" so latest-first doesn't immediately repeat it
+		// from the archive.
+		if (config.getPermanentStorage() && !tempResult.timestampName.empty()) {
+			lastArchivePlayed = ofToDataPath(config.getStoragePermanentDir(), true)
+				+ "/" + tempResult.timestampName;
+		}
+		resolveFinishedRecording();
+	} else {
+		lastArchivePlayed = playingDir;
+	}
+	playingDir.clear();
+	hasPlayState = false;
+	hasFrame = false;
+	if (videoPresent) {
+		mode = Mode::Live;
+	} else {
+		enterIdle(now);
+	}
+}
+
+//--------------------------------------------------------------
+void ofApp::enterIdle(float now) {
+	if (config.getArchivePlaybackEnabled()) {
+		mode = Mode::ArchiveWait;
+		scheduleArchivePlay(now);
+	} else {
+		mode = Mode::Idle;
+	}
+}
+
+//--------------------------------------------------------------
+void ofApp::scheduleArchivePlay(float now) {
+	const float base = config.getArchivePauseSeconds();
+	const float dev = config.getArchivePauseRandomSeconds();
+	archiveNextTime = now + std::max(0.0f, base + ofRandom(-dev, dev));
+}
+
+//--------------------------------------------------------------
+std::string ofApp::pickArchiveClip() {
+	ofDirectory dir(ofToDataPath(config.getStoragePermanentDir(), true));
+	if (!dir.exists()) {
+		return "";
+	}
+	dir.listDir();
+	std::vector<std::string> clips;
+	for (const auto & f : dir.getFiles()) {
+		if (f.isDirectory()) {
+			clips.push_back(f.getAbsolutePath());
+		}
+	}
+	if (clips.empty()) {
+		return "";
+	}
+	// Folder names are "%Y-%m-%d_%H-%M-%S", so a lexical sort is chronological.
+	std::sort(clips.begin(), clips.end());
+
+	using Order = ReceiverConfig::ArchiveOrder;
+	const Order order = config.getArchiveOrder();
+	if (order == Order::Random) {
+		if (clips.size() == 1) {
+			return clips.front();
+		}
+		std::string pick;
+		do {
+			const int idx = std::min(static_cast<int>(clips.size()) - 1,
+				static_cast<int>(ofRandom(static_cast<float>(clips.size()))));
+			pick = clips[static_cast<std::size_t>(idx)];
+		} while (pick == lastArchivePlayed);
+		return pick;
+	}
+
+	if (order == Order::LatestFirst) {
+		std::reverse(clips.begin(), clips.end());
+	}
+	if (lastArchivePlayed.empty()) {
+		return clips.front();
+	}
+	const auto it = std::find(clips.begin(), clips.end(), lastArchivePlayed);
+	if (it == clips.end()) {
+		return clips.front();
+	}
+	const std::size_t next = (static_cast<std::size_t>(std::distance(clips.begin(), it)) + 1)
+		% clips.size();
+	return clips[next];
+}
+
+//--------------------------------------------------------------
+const char * ofApp::modeName() const {
+	switch (mode) {
+	case Mode::Idle: return "idle";
+	case Mode::ArchiveWait: return "archive-wait";
+	case Mode::Live: return "live";
+	case Mode::LiveEnded: return "live-ended";
+	case Mode::PlayTemp: return "replay";
+	case Mode::PlayArchive: return "archive";
+	}
+	return "?";
 }
 
 //--------------------------------------------------------------
@@ -388,13 +669,13 @@ void ofApp::draw() {
 	const float ledW = config.getLedWidth() * drawScale;
 	const float ledH = config.getLedHeight() * drawScale;
 
-	// Effective fade: received presence fade times the local link fade. 'a'
-	// only disables the *received* part (to inspect the raw stream); the link
-	// fade always applies so a dead sender never leaves a frozen frame. The
-	// fade darkens the EYES only - the mouth grid below stays fully visible
-	// and eases to its neutral pose instead.
-	const float remoteFade = (applyFade && hasState) ? mouthState.fade : 1.0f;
-	const float effectiveFade = remoteFade * linkFade;
+	// Effective fade: the active source's fade (live packet fade or replayed
+	// timeline fade, picked in update()) times the local link fade. 'a' only
+	// disables the *source* part (to inspect the raw stream); the link fade
+	// always applies so a dead source never leaves a frozen frame. The fade
+	// darkens the EYES only - the mouth grid below stays fully visible and
+	// eases to its neutral pose instead.
+	const float effectiveFade = activeRemoteFade * linkFade;
 
 	// Compose the LED content at full LED resolution in the FBO, then draw it
 	// to screen through the grade shader so the grade applies to the final
@@ -487,9 +768,11 @@ void ofApp::draw() {
 			<< " | render " << ofToString(ofGetFrameRate(), 1)
 			<< " | frames " << receiver.getFrameCount()
 			<< " | dropped " << receiver.getDroppedCount()
-			<< " | fade " << (hasState ? ofToString(mouthState.fade, 2) : std::string("--"))
+			<< " | fade " << ofToString(activeRemoteFade, 2)
 			<< " (" << (applyFade ? "applied" : "off") << ")"
 			<< " | link " << ofToString(linkFade, 2)
+			<< " | " << modeName()
+			<< (recordingActive ? (recordSlot == 0 ? " (rec a)" : " (rec b)") : "")
 			<< " | mouth " << (mouthDisplay.isIdle() ? "idle" : "live")
 			<< (streamAlive ? "" : " (lost)");
 
@@ -513,9 +796,16 @@ void ofApp::draw() {
 	}
 
 	// Waiting notice (own row, below the status text so nothing overlaps):
-	// before the first frame ever, or once a lost stream has fully faded to
-	// black. The LED area itself stays black either way.
-	if (!hasFrame || (!streamAlive && linkFade <= 0.0f)) {
+	// only while genuinely idle - never over a running or starting playback.
+	// The LED area itself stays black either way.
+	if (mode == Mode::ArchiveWait) {
+		ofSetColor(255);
+		ofDrawBitmapString("waiting for stream on UDP port "
+			+ ofToString(config.getListenPort())
+			+ " | next archive clip in "
+			+ ofToString(std::max(0.0f, archiveNextTime - ofGetElapsedTimef()), 0) + "s",
+			pad, noticeY);
+	} else if (mode == Mode::Idle && (!hasFrame || linkFade <= 0.0f)) {
 		ofSetColor(255);
 		ofDrawBitmapString("waiting for stream on UDP port "
 			+ ofToString(config.getListenPort()), pad, noticeY);
@@ -532,7 +822,18 @@ void ofApp::draw() {
 
 //--------------------------------------------------------------
 void ofApp::exit() {
+	// Stop the producer first, then flush the writer: finalize a recording
+	// that is still open and promote/discard the last finalized one before
+	// the recorder drains its queue and joins.
 	receiver.close();
+	player.close();
+	if (recordingActive) {
+		recorder.finalizeRecording();
+		recordingActive = false;
+		tempNeedsResolve = true;
+	}
+	resolveFinishedRecording();
+	recorder.close();
 	artnet.close();
 }
 

@@ -47,6 +47,31 @@ public:
 	/// State packets (not video) are the heartbeat: the sender keeps sending
 	/// them even while the video stream is gated off at fade 0.
 	float getStreamTimeoutSeconds() const { return streamTimeoutSeconds; }
+
+	// --- stream storage (config "storage" block) ---
+	// Every camera stream (video presence, not the UDP link) is recorded into
+	// a temp slot folder as a JPEG sequence plus a JSONL timeline. Paths are
+	// data-relative (resolved with ofToDataPath at use).
+	std::string getStorageTempDir() const { return storageTempDir; }
+	std::string getStoragePermanentDir() const { return storagePermanentDir; }
+	/// Play the just-recorded stream back as soon as the live stream ends.
+	bool getImmediatePlayback() const { return immediatePlayback; }
+	/// Move finished temp recordings into the permanent folder structure
+	/// (one timestamped folder per stream) instead of discarding them.
+	bool getPermanentStorage() const { return permanentStorage; }
+	/// Free space (GB) that must remain on the permanent storage volume for
+	/// temp recordings and system operations; below it, promotion is skipped.
+	float getMinFreeGb() const { return minFreeGb; }
+
+	// --- automated playback from the permanent storage ---
+	enum class ArchiveOrder { LatestFirst, OldestFirst, Random };
+	bool getArchivePlaybackEnabled() const { return archiveEnabled; }
+	ArchiveOrder getArchiveOrder() const { return archiveOrder; }
+	/// Pause between archive clips; also the initial delay before the first
+	/// clip after going idle.
+	float getArchivePauseSeconds() const { return archivePauseSeconds; }
+	/// Random deviation applied to the pause: pause + random(-dev, +dev).
+	float getArchivePauseRandomSeconds() const { return archivePauseRandomSeconds; }
 	/// Ramp times of the local link fade that blacks out the frozen frame
 	/// when the sender disappears and fades back in when it returns.
 	float getFadeInSeconds() const { return fadeInSeconds; }
@@ -111,6 +136,15 @@ private:
 	float streamTimeoutSeconds = 1.0f;
 	float fadeInSeconds = 0.5f;
 	float fadeOutSeconds = 2.0f;
+	std::string storageTempDir = "recordings/tmp";
+	std::string storagePermanentDir = "recordings/permanent";
+	bool immediatePlayback = true;
+	bool permanentStorage = false;
+	float minFreeGb = 10.0f;
+	bool archiveEnabled = false;
+	ArchiveOrder archiveOrder = ArchiveOrder::LatestFirst;
+	float archivePauseSeconds = 8.0f;
+	float archivePauseRandomSeconds = 2.0f;
 	int mouthLightsW = 18;
 	int mouthLightsH = 5;
 	int mouthRow = 3;

@@ -1,6 +1,7 @@
 #include "EyeStreamReceiver.h"
 
 #include "EyeStreamProtocol.h"
+#include "StreamRecorder.h"
 
 #include <cmath>
 #include <cstring>
@@ -160,6 +161,11 @@ void EyeStreamReceiver::threadedFunction() {
 				haveState = true;
 			}
 			stateCount.fetch_add(1);
+			if (auto * rec = recorder.load()) {
+				rec->pushState(static_cast<double>(ofGetElapsedTimeMicros()) / 1000000.0,
+					std::min(1.0f, std::max(0.0f, sp.fade)), hasTarget,
+					sp.lightsW, sp.lightsH, sp.targetLeft, sp.targetRight);
+			}
 			continue;
 		}
 
@@ -256,6 +262,18 @@ void EyeStreamReceiver::threadedFunction() {
 
 		if (decoded) {
 			frameCount.fetch_add(1);
+			// Recording sink: JPEG payloads go out as the received bytes (no
+			// re-encode); raw frames as pixels, encoded on the writer thread.
+			if (auto * rec = recorder.load()) {
+				const double t = static_cast<double>(ofGetElapsedTimeMicros()) / 1000000.0;
+				if (curFormat == eyestream::kFormatJpeg) {
+					rec->pushJpegFrame(t, payload.data(), payload.size());
+				} else {
+					rec->pushRawFrame(t,
+						reinterpret_cast<const unsigned char *>(payload.data()),
+						curWidth, curHeight);
+				}
+			}
 		} else {
 			droppedCount.fetch_add(1);
 		}

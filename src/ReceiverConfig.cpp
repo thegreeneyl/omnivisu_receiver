@@ -57,6 +57,39 @@ bool ReceiverConfig::load(const std::string & path) {
 		fadeOutSeconds = r.value("fade_out_seconds", fadeOutSeconds);
 	}
 
+	// Stream storage: temp capture of every camera stream plus the optional
+	// promotion into the permanent per-stream folder structure.
+	if (json.contains("storage")) {
+		const auto & s = json["storage"];
+		storageTempDir = s.value("temp_dir", storageTempDir);
+		storagePermanentDir = s.value("permanent_dir", storagePermanentDir);
+		immediatePlayback = s.value("immediate_playback", immediatePlayback);
+		permanentStorage = s.value("permanent_storage", permanentStorage);
+		minFreeGb = std::max(0.0f, s.value("min_free_gb", minFreeGb));
+	}
+
+	// Automated playback from the permanent storage while no live stream and
+	// no immediate replay is running.
+	if (json.contains("archive_playback")) {
+		const auto & a = json["archive_playback"];
+		archiveEnabled = a.value("enabled", archiveEnabled);
+		const std::string order = a.value("order", std::string("latest_first"));
+		if (order == "oldest_first") {
+			archiveOrder = ArchiveOrder::OldestFirst;
+		} else if (order == "random") {
+			archiveOrder = ArchiveOrder::Random;
+		} else {
+			if (order != "latest_first") {
+				ofLogWarning("ReceiverConfig") << "unknown archive_playback.order '"
+					<< order << "' - using latest_first";
+			}
+			archiveOrder = ArchiveOrder::LatestFirst;
+		}
+		archivePauseSeconds = std::max(0.0f, a.value("pause_seconds", archivePauseSeconds));
+		archivePauseRandomSeconds = std::max(0.0f,
+			a.value("pause_random_seconds", archivePauseRandomSeconds));
+	}
+
 	// Mouth presentation: the receiver owns fixture placement, easing, and
 	// the neutral idle pose (the wire only carries target edges in the
 	// mouth-span), so these are receiver-side knobs.

@@ -8,6 +8,8 @@
 #include <mutex>
 #include <vector>
 
+class StreamRecorder;
+
 /// Receives the eye video UDP stream on a worker thread, reassembles each frame
 /// from its packets, and publishes the latest fully-received frame to the main
 /// thread. Incomplete or stale frames are discarded so playback stays realtime
@@ -38,6 +40,12 @@ public:
 	/// Binds the UDP socket to listenPort and starts the worker thread.
 	bool setup(int listenPort);
 	void close();
+
+	/// Optional recording sink. Every completed video frame (the JPEG wire
+	/// payload as-is, or the raw RGB pixels) and every accepted state packet
+	/// is additionally pushed onto the recorder's queue - enqueue-only, so
+	/// the receive loop never touches the disk. Set before setup().
+	void setRecorder(StreamRecorder * rec) { recorder.store(rec); }
 
 	/// If a frame newer than the last one returned is ready, copies it into
 	/// out and returns true. Otherwise returns false and leaves out untouched.
@@ -73,4 +81,6 @@ private:
 	std::atomic<std::uint64_t> frameCount{0};
 	std::atomic<std::uint64_t> droppedCount{0};
 	std::atomic<std::uint64_t> stateCount{0};
+
+	std::atomic<StreamRecorder *> recorder{nullptr};
 };

@@ -6,6 +6,8 @@
 #include "EyeStreamReceiver.h"
 #include "MouthDisplay.h"
 #include "ArtnetSender.h"
+#include "StreamRecorder.h"
+#include "StreamPlayer.h"
 
 class ofApp : public ofBaseApp {
 public:
@@ -75,6 +77,51 @@ private:
 	float lastVideoTime = -1.0f;
 	bool streamAlive = false;
 
+	// --- recording + playback of camera streams ---
+	// A "camera stream" is VIDEO presence (completed frames within the
+	// timeout), not the UDP link: the sender heartbeats state packets at
+	// fade 0 without any video. Every stream is recorded into one of two
+	// temp slot folders (ping-pong, so a new stream can record while the
+	// previous clip still plays), optionally replayed immediately when it
+	// ends, and optionally promoted into the permanent per-stream archive.
+	StreamRecorder recorder;
+	StreamPlayer player;
+
+	/// What the LED area is showing / waiting for. Fades are sequential
+	/// through black (single linkFade): a source switch first ramps the fade
+	/// to 0, then swaps, then ramps back up.
+	enum class Mode {
+		Idle,        ///< Nothing to show; archive playback disabled.
+		ArchiveWait, ///< Idle, waiting out the pause before an archive clip.
+		Live,        ///< Live stream on screen (and being recorded).
+		LiveEnded,   ///< Live gone: fading out, then waiting for the
+		             ///< recorder's finalize result to decide what is next.
+		PlayTemp,    ///< Immediate replay of the just-recorded temp clip.
+		PlayArchive  ///< Automated playback from the permanent storage.
+	};
+	Mode mode = Mode::Idle;
+	bool videoPresent = false;
+
+	bool recordingActive = false;
+	std::uint64_t activeRecordingId = 0;
+	int recordSlot = 1; ///< Slot of the current/last recording; next uses the other.
+	/// Set when a recording is finalized, cleared when its promote/discard
+	/// has been queued - guards against resolving twice or never.
+	bool tempNeedsResolve = false;
+	StreamRecorder::Result tempResult; ///< Finalize result of the clip in PlayTemp.
+
+	std::string playingDir;                    ///< Folder currently in the player.
+	EyeStreamReceiver::MouthState playState;   ///< Latest replayed state.
+	bool hasPlayState = false;
+
+	std::string lastArchivePlayed; ///< Skip-repeat anchor for the archive order.
+	float archiveNextTime = -1.0f; ///< When the next archive clip may start.
+
+	/// Remote (source-side) fade of whatever source is on screen: the live
+	/// packet fade or the replayed timeline fade. Combined with linkFade in
+	/// draw(); kept as a member so update() picks the source once.
+	float activeRemoteFade = 1.0f;
+
 	// --- color grading of the final LED output ---
 	// The doubled eye canvas is rendered into ledFbo at full LED resolution
 	// and drawn to screen through the grade shader (same controls and shader
@@ -110,12 +157,36 @@ private:
 	/// mode and listen port need a restart and are logged if changed.
 	void reloadRuntimeConfig();
 
-	// Local link fade [0..1]: ramps toward 1 while the stream is alive,
-	// toward 0 when it disappears, so a frozen last frame fades out
-	// gracefully and a returning stream fades back in. Combined with the
-	// received fade by multiplication (effective = link * remote), which
-	// resolves every constellation without special cases: a stale remote
-	// value gets ramped down by the link fade, and a returning sender never
-	// snaps in even if its own fade is already at 1.
+	// --- recording/playback helpers ---
+	/// Absolute path of temp slot 0 ("a") or 1 ("b").
+	std::string tempSlotDir(int slot) const;
+	/// Uploads a new pixel buffer into frameTex (allocating on size change).
+	void uploadFrame();
+	/// Queues promote-or-discard of the last finalized recording (exactly
+	/// once, guarded by tempNeedsResolve).
+	void resolveFinishedRecording();
+	/// Starts the player on dir and switches the mode (frame blanked until
+	/// the first replayed frame arrives).
+	void startPlayback(const std::string & dir, Mode playMode);
+	/// Leaves a playback mode at fade 0: stops the player, resolves a temp
+	/// clip, and returns to Live / ArchiveWait / Idle.
+	void exitPlayback(float now);
+	/// Where to go when there is nothing to show.
+	void enterIdle(float now);
+	/// Sets archiveNextTime to now + pause +- random deviation.
+	void scheduleArchivePlay(float now);
+	/// Picks the next archive clip honoring the configured order; empty
+	/// string when the archive is empty.
+	std::string pickArchiveClip();
+	const char * modeName() const;
+
+	// Local link fade [0..1]: ramps toward 1 while the current display source
+	// (live stream or playback) should be visible, toward 0 while idle or
+	// switching sources, so a frozen last frame fades out gracefully and the
+	// next source fades in from black. Combined with the source's own fade by
+	// multiplication (effective = link * remote), which resolves every
+	// constellation without special cases: a stale remote value gets ramped
+	// down by the link fade, and a returning source never snaps in even if
+	// its own fade is already at 1.
 	float linkFade = 0.0f;
 };
