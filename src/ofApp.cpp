@@ -764,8 +764,8 @@ void ofApp::draw() {
 
 	if (showInfo) {
 		std::ostringstream msg;
-		msg << "recv " << ofToString(receivedFps, 1) << " fps"
-			<< " | render " << ofToString(ofGetFrameRate(), 1)
+		msg << "main " << ofToString(ofGetFrameRate(), 1) << " fps"
+			<< " | recv " << ofToString(receivedFps, 1) << " fps"
 			<< " | frames " << receiver.getFrameCount()
 			<< " | dropped " << receiver.getDroppedCount()
 			<< " | fade " << ofToString(activeRemoteFade, 2)
