@@ -66,6 +66,7 @@ bool ReceiverConfig::load(const std::string & path) {
 		immediatePlayback = s.value("immediate_playback", immediatePlayback);
 		permanentStorage = s.value("permanent_storage", permanentStorage);
 		minFreeGb = std::max(0.0f, s.value("min_free_gb", minFreeGb));
+		minClipSeconds = std::max(0.0f, s.value("min_duration_seconds", minClipSeconds));
 	}
 
 	// Automated playback from the permanent storage while no live stream and

@@ -133,12 +133,13 @@ void StreamRecorder::finalizeRecording() {
 
 //--------------------------------------------------------------
 void StreamRecorder::resolveLastRecording(bool keepPermanent,
-	const std::string & permanentParentAbs, double minFreeGb) {
+	const std::string & permanentParentAbs, double minFreeGb, double minClipSeconds) {
 	Item item;
 	item.type = ItemType::Resolve;
 	item.keepPermanent = keepPermanent;
 	item.dir = permanentParentAbs;
 	item.minFreeGb = minFreeGb;
+	item.minClipSeconds = minClipSeconds;
 	enqueue(std::move(item), false);
 }
 
@@ -227,6 +228,7 @@ void StreamRecorder::handleStart(const Item & item) {
 	recName = item.name;
 	recStartT = item.t;
 	recLastT = 0.0;
+	recLastFrameT = 0.0;
 	recFrames = 0;
 	recBytes = 0;
 	ofLogNotice("StreamRecorder") << "recording started: " << item.dir
@@ -273,6 +275,7 @@ void StreamRecorder::handleFrame(Item & item) {
 	++recFrames;
 	recBytes += item.bytes.size();
 	recLastT = std::max(recLastT, t);
+	recLastFrameT = std::max(recLastFrameT, t);
 }
 
 //--------------------------------------------------------------
@@ -307,6 +310,7 @@ void StreamRecorder::finalizeOpenRecording() {
 	manifest["started"] = recName;
 	manifest["frames"] = recFrames;
 	manifest["duration_seconds"] = recLastT;
+	manifest["video_seconds"] = recLastFrameT;
 	manifest["payload_bytes"] = recBytes;
 	ofSavePrettyJson(fs::path(recDir) / "manifest.json", manifest);
 
@@ -316,6 +320,7 @@ void StreamRecorder::finalizeOpenRecording() {
 	res.timestampName = recName;
 	res.frameCount = recFrames;
 	res.durationSeconds = recLastT;
+	res.videoSeconds = recLastFrameT;
 
 	{
 		std::lock_guard<std::mutex> lk(resultMutex);
@@ -343,6 +348,15 @@ void StreamRecorder::handleResolve(const Item & item) {
 		removeDir(res.dir);
 		ofLogNotice("StreamRecorder") << "temp recording discarded: " << res.dir
 			<< (res.frameCount <= 0 ? " (empty)" : "");
+		return;
+	}
+	// Min-length gate: clips shorter than the threshold never reach the
+	// permanent archive (someone only glancing at the camera).
+	if (res.videoSeconds < item.minClipSeconds) {
+		removeDir(res.dir);
+		ofLogNotice("StreamRecorder") << "temp recording discarded: " << res.dir
+			<< " (video " << ofToString(res.videoSeconds, 2) << "s < min "
+			<< ofToString(item.minClipSeconds, 2) << "s)";
 		return;
 	}
 	promoteDir(res.dir, item.dir, res.timestampName, item.minFreeGb);

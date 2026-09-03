@@ -533,7 +533,8 @@ void ofApp::resolveFinishedRecording() {
 	// finalized before it - even if a new one has already started behind it.
 	recorder.resolveLastRecording(config.getPermanentStorage(),
 		ofToDataPath(config.getStoragePermanentDir(), true),
-		static_cast<double>(config.getMinFreeGb()));
+		static_cast<double>(config.getMinFreeGb()),
+		static_cast<double>(config.getMinClipSeconds()));
 }
 
 //--------------------------------------------------------------

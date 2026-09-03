@@ -41,6 +41,9 @@ public:
 		std::string timestampName; ///< Human-readable start time, e.g. "2026-09-02_10-45-12".
 		int frameCount = 0;
 		double durationSeconds = 0.0;
+		/// Timestamp of the last video frame = the actual clip length (the
+		/// timeline keeps ~a timeout of trailing fade-0 states after it).
+		double videoSeconds = 0.0;
 	};
 
 	~StreamRecorder() override;
@@ -65,10 +68,11 @@ public:
 	/// Stops accepting data immediately and queues the manifest write.
 	void finalizeRecording();
 	/// Promotes (keepPermanent, with a free-space gate) or deletes the most
-	/// recently finalized recording. Empty recordings are always deleted.
-	/// Must be called exactly once per finalized recording.
+	/// recently finalized recording. Empty recordings and clips whose video is
+	/// shorter than minClipSeconds are always deleted, so they never reach the
+	/// archive. Must be called exactly once per finalized recording.
 	void resolveLastRecording(bool keepPermanent, const std::string & permanentParentAbs,
-		double minFreeGb);
+		double minFreeGb, double minClipSeconds);
 	/// Deletes a folder (temp-slot cleanup at startup).
 	void discard(const std::string & dirAbs);
 
@@ -95,6 +99,7 @@ private:
 		std::string name;      ///< Start: human-readable timestamp.
 		bool keepPermanent = false;
 		double minFreeGb = 0.0;
+		double minClipSeconds = 0.0;
 		std::uint64_t id = 0;
 	};
 
@@ -132,6 +137,7 @@ private:
 	std::string recName;
 	double recStartT = 0.0;
 	double recLastT = 0.0;
+	double recLastFrameT = 0.0;
 	int recFrames = 0;
 	std::uint64_t recBytes = 0;
 	std::ofstream timeline;

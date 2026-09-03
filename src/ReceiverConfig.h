@@ -62,6 +62,10 @@ public:
 	/// Free space (GB) that must remain on the permanent storage volume for
 	/// temp recordings and system operations; below it, promotion is skipped.
 	float getMinFreeGb() const { return minFreeGb; }
+	/// Minimum video length (seconds) a recording must reach to be stored
+	/// permanently; shorter clips are discarded so they never show up in the
+	/// archive playback.
+	float getMinClipSeconds() const { return minClipSeconds; }
 
 	// --- automated playback from the permanent storage ---
 	enum class ArchiveOrder { LatestFirst, OldestFirst, Random };
@@ -141,6 +145,7 @@ private:
 	bool immediatePlayback = true;
 	bool permanentStorage = false;
 	float minFreeGb = 10.0f;
+	float minClipSeconds = 5.0f;
 	bool archiveEnabled = false;
 	ArchiveOrder archiveOrder = ArchiveOrder::LatestFirst;
 	float archivePauseSeconds = 8.0f;

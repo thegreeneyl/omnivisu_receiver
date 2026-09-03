@@ -20,7 +20,8 @@
         "permanent_dir": "recordings/permanent",
         "immediate_playback": true,
         "permanent_storage": false,
-        "min_free_gb": 10.0
+        "min_free_gb": 10.0,
+        "min_duration_seconds": 5.0
     },
     "archive_playback": {
         "enabled": false,
