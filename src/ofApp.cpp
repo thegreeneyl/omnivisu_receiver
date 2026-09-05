@@ -53,7 +53,20 @@ void ofApp::setup() {
 	gradingGroup.add(gradeContrast);
 	gradingGroup.add(gradeGamma);
 	gradingGroup.add(gradeSaturation);
+	gradingGroup.add(gradeRed);
+	gradingGroup.add(gradeGreen);
+	gradingGroup.add(gradeBlue);
+	// The mouth color starts from config.json (mouth.color); a value saved in
+	// grading.json (loaded below) overrides it.
+	mouthRgb.set(config.getMouthColor());
+	gradingGroup.add(mouthRgb);
 	gradingPanel.setup(gradingGroup);
+	saveGradingButton.setup("save grading (s)");
+	saveGradingButton.addListener(this, &ofApp::onSaveGradingPressed);
+	gradingPanel.add(&saveGradingButton);
+	reloadGradingButton.setup("reload grading (r)");
+	reloadGradingButton.addListener(this, &ofApp::onReloadGradingPressed);
+	gradingPanel.add(&reloadGradingButton);
 	loadGradingParams();
 
 	// Mouth presentation: starts on its neutral pose, so the fixture grid is
@@ -162,6 +175,7 @@ bool ofApp::buildGradeShader(bool useRect) {
 		"uniform float uContrast;\n"
 		"uniform float uGamma;\n"
 		"uniform float uSaturation;\n"
+		"uniform vec3 uGain;\n"
 		"in vec2 vTexCoord;\n"
 		"out vec4 outColor;\n"
 		"void main() {\n"
@@ -172,6 +186,7 @@ bool ofApp::buildGradeShader(bool useRect) {
 		"    c = pow(max(c, vec3(0.0)), vec3(1.0 / uGamma));\n"
 		"    float luma = dot(c, vec3(0.299, 0.587, 0.114));\n"
 		"    c = mix(vec3(luma), c, uSaturation);\n"
+		"    c *= uGain;\n" // per-channel RGB gain: hue/white-point shift
 		"    c = clamp(c, vec3(0.0), vec3(1.0));\n"
 		"    outColor = vec4(c, 1.0);\n"
 		"}\n";
@@ -227,6 +242,16 @@ bool ofApp::saveGradingParams() {
 }
 
 //--------------------------------------------------------------
+void ofApp::onSaveGradingPressed() {
+	saveGradingParams();
+}
+
+//--------------------------------------------------------------
+void ofApp::onReloadGradingPressed() {
+	loadGradingParams();
+}
+
+//--------------------------------------------------------------
 void ofApp::reloadRuntimeConfig() {
 	const auto prevMode = config.getWindowMode();
 	const int prevPort = config.getListenPort();
@@ -260,6 +285,9 @@ void ofApp::reloadRuntimeConfig() {
 	// ArtNet is fully runtime-tunable: the socket is recreated on reload.
 	artnet.setup(artnetConfig());
 
+	// Mouth color: config.json is the fallback, a value saved in grading.json
+	// (reloaded right after) overrides it - same order as setup().
+	mouthRgb.set(config.getMouthColor());
 	loadGradingParams();
 	ofLogNotice("omnivisu_receiver") << "config + grading reloaded";
 }
@@ -494,6 +522,10 @@ void ofApp::update() {
 	// draw() darkens the eyes with): image faded to black -> eye lights fully
 	// on; image fully visible -> eye lights off.
 	mouthDisplay.setEyeIntensity(1.0f - activeRemoteFade * linkFade);
+	// The panel's mouth color is applied every frame so slider drags and
+	// grading reloads are live immediately (setColor is a plain assignment;
+	// the raster below picks it up).
+	mouthDisplay.setColor(mouthRgb.get());
 	mouthDisplay.update(dt);
 
 	// Ship the freshly rasterized fixture grid to the lights. Same frame to
@@ -709,6 +741,8 @@ void ofApp::draw() {
 		gradeShader.setUniform1f("uContrast", gradeContrast.get());
 		gradeShader.setUniform1f("uGamma", std::max(0.01f, gradeGamma.get()));
 		gradeShader.setUniform1f("uSaturation", gradeSaturation.get());
+		gradeShader.setUniform3f("uGain",
+			gradeRed.get(), gradeGreen.get(), gradeBlue.get());
 		ledFbo.getTexture().draw(0, 0, ledW, ledH);
 		gradeShader.end();
 	} else {
@@ -853,6 +887,11 @@ void ofApp::keyPressed(int key) {
 	} else if (key == 's' || key == 'S') {
 		saveGradingParams();
 	} else if (key == 'r' || key == 'R') {
+		// Reload ONLY grading.json (sliders + mouth color), so a look edited
+		// in a text editor can be pulled in without touching the rest of the
+		// runtime config. 'c' does the full config + grading reload.
+		loadGradingParams();
+	} else if (key == 'c' || key == 'C') {
 		reloadRuntimeConfig();
 	}
 }

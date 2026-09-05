@@ -64,6 +64,12 @@ public:
 	/// fully lit, fully visible image -> eyes off.
 	void setEyeIntensity(float intensity);
 
+	/// Sets the fully-on light color (mouth AND eye blocks; alpha ignored)
+	/// without touching the FBOs or the eased edges - safe to call every
+	/// frame for a live GUI control. The next update()/renderLights() pass
+	/// rasterizes with the new color.
+	void setColor(const ofColor & color);
+
 	/// Eases the current edges toward the target and re-rasterizes the grid.
 	void update(float dt);
 

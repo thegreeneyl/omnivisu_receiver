@@ -83,6 +83,11 @@ void MouthDisplay::setEyeIntensity(float intensity) {
 }
 
 //--------------------------------------------------------------
+void MouthDisplay::setColor(const ofColor & color) {
+	cfg.color = color;
+}
+
+//--------------------------------------------------------------
 void MouthDisplay::update(float dt) {
 	if (!initialized) {
 		return;

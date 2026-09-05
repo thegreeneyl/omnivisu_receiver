@@ -135,7 +135,21 @@ private:
 	ofParameter<float> gradeContrast{ "contrast", 1.0f, 0.0f, 2.0f };
 	ofParameter<float> gradeGamma{ "gamma", 1.0f, 0.3f, 3.0f };
 	ofParameter<float> gradeSaturation{ "saturation", 1.0f, 0.0f, 2.0f };
+	// Per-channel gains applied at the END of the grade (after saturation,
+	// before clamp). The simple way to shift the hue/white point: dim red
+	// and lift blue for a colder image. 1 = neutral.
+	ofParameter<float> gradeRed{ "red", 1.0f, 0.0f, 2.0f };
+	ofParameter<float> gradeGreen{ "green", 1.0f, 0.0f, 2.0f };
+	ofParameter<float> gradeBlue{ "blue", 1.0f, 0.0f, 2.0f };
+	// Fully-on color of the mouth/eye fixture lights, live-tunable so the
+	// bar can be matched to the LED's neutral white. NOT run through the
+	// grade shader (fixture white and camera look stay separate). Starts
+	// from config.json mouth.color; a value saved in grading.json overrides.
+	ofParameter<ofColor> mouthRgb{ "mouth color", ofColor::white,
+		ofColor(0, 0, 0, 0), ofColor(255, 255, 255, 255) };
 	ofxPanel gradingPanel;
+	ofxButton saveGradingButton;
+	ofxButton reloadGradingButton;
 	ofFbo ledFbo;
 	ofShader gradeShader;
 	bool gradeShaderLoaded = false;
@@ -152,9 +166,14 @@ private:
 	ArtnetSender::Config artnetConfig() const;
 	bool loadGradingParams();
 	bool saveGradingParams();
+	/// ofxButton listeners for the panel's save/reload buttons (same actions
+	/// as the 's' and 'r' keys).
+	void onSaveGradingPressed();
+	void onReloadGradingPressed();
 	/// Re-reads config.json for the runtime-safe values (fades, timeout,
-	/// apply_fade, scale, LED size, vsync) and reloads grading.json. Window
-	/// mode and listen port need a restart and are logged if changed.
+	/// apply_fade, scale, LED size, vsync) and reloads grading.json. Bound
+	/// to 'c' ('r' reloads only grading.json). Window mode and listen port
+	/// need a restart and are logged if changed.
 	void reloadRuntimeConfig();
 
 	// --- recording/playback helpers ---
