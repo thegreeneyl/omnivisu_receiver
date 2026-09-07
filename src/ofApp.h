@@ -39,6 +39,16 @@ private:
 	bool showInfo = true;
 	float lastLogTime = 0.0f;
 
+	// Operator-UI magnification (config receiver.ui_scale, default 3): the
+	// gui panels use scaled ofxGui defaults (set up once in setup()), the
+	// status/notice text is drawn with uiFont instead of the tiny bitmap
+	// font, and the fade meter/row layout multiply by uiScale.
+	float uiScale = 3.0f;
+	ofTrueTypeFont uiFont;
+	/// Status/notice text at UI size: uiFont when loaded, bitmap fallback.
+	void drawUiText(const std::string & text, float x, float y);
+	float uiTextWidth(const std::string & text) const;
+
 	// Latest mouth/fade state from the "MOUT" datagrams (same UDP port as
 	// the video): the eyes' presence fade plus the sender's quantized mouth
 	// target edges (light units of its grid).
@@ -150,6 +160,30 @@ private:
 	ofxPanel gradingPanel;
 	ofxButton saveGradingButton;
 	ofxButton reloadGradingButton;
+
+	// --- selective color correction (Photoshop-style) ---
+	// Two independent hue bands in the grade shader, each defined by a hue
+	// center, a fully-affected range, and a soft falloff (all in degrees).
+	// Inside a band, saturation/hue/brightness are adjusted - weighted by
+	// the pixel's OWN saturation, so near-gray/white pixels are never
+	// touched (desaturating the reds cannot tint the whites). Band A
+	// defaults to red (0 deg), band B to magenta (315 deg); neutral values
+	// (sat 1, shift 0, brightness 1) leave the image unchanged.
+	ofParameterGroup selectiveGroup{ "selective_color" };
+	ofParameter<bool> selShowMask{ "show mask", false };
+	ofParameter<float> selAHue{ "A hue center", 0.0f, 0.0f, 360.0f };
+	ofParameter<float> selARange{ "A range", 40.0f, 0.0f, 180.0f };
+	ofParameter<float> selAFalloff{ "A falloff", 30.0f, 0.0f, 120.0f };
+	ofParameter<float> selASaturation{ "A saturation", 1.0f, 0.0f, 2.0f };
+	ofParameter<float> selAHueShift{ "A hue shift", 0.0f, -60.0f, 60.0f };
+	ofParameter<float> selABrightness{ "A brightness", 1.0f, 0.0f, 2.0f };
+	ofParameter<float> selBHue{ "B hue center", 315.0f, 0.0f, 360.0f };
+	ofParameter<float> selBRange{ "B range", 40.0f, 0.0f, 180.0f };
+	ofParameter<float> selBFalloff{ "B falloff", 30.0f, 0.0f, 120.0f };
+	ofParameter<float> selBSaturation{ "B saturation", 1.0f, 0.0f, 2.0f };
+	ofParameter<float> selBHueShift{ "B hue shift", 0.0f, -60.0f, 60.0f };
+	ofParameter<float> selBBrightness{ "B brightness", 1.0f, 0.0f, 2.0f };
+	ofxPanel selectivePanel;
 	ofFbo ledFbo;
 	ofShader gradeShader;
 	bool gradeShaderLoaded = false;

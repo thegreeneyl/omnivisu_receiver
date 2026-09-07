@@ -9,6 +9,7 @@
         "display": 0,
         "vsync": true,
         "scale": 1.0,
+        "ui_scale": 3.0,
         "apply_fade": true,
         "mouth_band": 96,
         "stream_timeout_seconds": 1.0,
@@ -21,13 +22,13 @@
         "immediate_playback": true,
         "permanent_storage": true,
         "min_free_gb": 50.0,
-        "min_duration_seconds": 5.0
+        "min_duration_seconds": 8.0
     },
     "archive_playback": {
         "enabled": false,
         "order": "latest_first",
-        "pause_seconds": 8.0,
-        "pause_random_seconds": 2.0
+        "pause_seconds": 30.0,
+        "pause_random_seconds": 10.0
     },
     "mouth": {
         "lights": { "w": 18, "h": 5 },

@@ -1,14 +1,29 @@
 {
     "grading": {
-        "blue": "1.12",
+        "blue": "1.13",
         "brightness": "0",
         "contrast": "1",
         "enable_grading": "1",
         "exposure__stops_": "0",
         "gamma": "1",
-        "green": "1",
-        "mouth_color": "255, 255, 255, 255",
-        "red": "0.85",
-        "saturation": "1"
+        "green": "0.93",
+        "mouth_color": "244, 255, 199, 255",
+        "red": "0.89",
+        "saturation": "0.7"
+    },
+    "selective_color": {
+        "A_brightness": "1",
+        "A_falloff": "30",
+        "A_hue_center": "0",
+        "A_hue_shift": "0",
+        "A_range": "40",
+        "A_saturation": "1",
+        "B_brightness": "1",
+        "B_falloff": "30",
+        "B_hue_center": "315",
+        "B_hue_shift": "0",
+        "B_range": "40",
+        "B_saturation": "1",
+        "show_mask": "0"
     }
 }

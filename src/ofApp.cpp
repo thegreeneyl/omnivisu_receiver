@@ -45,6 +45,27 @@ void ofApp::setup() {
 	// re-allocates if an incoming frame ever differs.
 	frameTex.allocate(config.getWidth(), config.getHeight(), GL_RGB);
 
+	// Operator-UI magnification for high-resolution screens: the ofxGui
+	// defaults (font, row height, panel width) are global and must be set
+	// BEFORE the panels are built. uiFont draws the status/notice text at
+	// the same size. ui_scale changes need a restart (fonts and panel
+	// geometry are built once).
+	uiScale = std::max(1.0f, config.getUiScale());
+	const int uiFontSize = static_cast<int>(std::lround(10.0f * uiScale));
+	const std::string uiFontFile = "LiberationMono-Regular.ttf";
+	if (ofFile::doesFileExist(ofToDataPath(uiFontFile, true))) {
+		ofxGuiSetFont(uiFontFile, uiFontSize);
+		uiFont.load(uiFontFile, uiFontSize);
+	} else {
+		ofLogWarning("omnivisu_receiver") << uiFontFile
+			<< " not found in data/ - falling back to the system mono font";
+		ofxGuiSetFont(OF_TTF_MONO, uiFontSize);
+		uiFont.load(OF_TTF_MONO, uiFontSize);
+	}
+	ofxGuiSetDefaultWidth(static_cast<int>(std::lround(200.0f * uiScale)));
+	ofxGuiSetDefaultHeight(static_cast<int>(std::lround(18.0f * uiScale)));
+	ofxGuiSetTextPadding(static_cast<int>(std::lround(4.0f * uiScale)));
+
 	// Grading: FBO at full LED resolution, controls panel, persisted values.
 	allocateLedFbo();
 	gradingGroup.add(enableGrading);
@@ -67,6 +88,25 @@ void ofApp::setup() {
 	reloadGradingButton.setup("reload grading (r)");
 	reloadGradingButton.addListener(this, &ofApp::onReloadGradingPressed);
 	gradingPanel.add(&reloadGradingButton);
+
+	// Selective color: its own panel next to the grading panel (both would
+	// be unusably tall combined at ui_scale 3). Saved/reloaded together with
+	// the grading group into grading.json.
+	selectiveGroup.add(selShowMask);
+	selectiveGroup.add(selAHue);
+	selectiveGroup.add(selARange);
+	selectiveGroup.add(selAFalloff);
+	selectiveGroup.add(selASaturation);
+	selectiveGroup.add(selAHueShift);
+	selectiveGroup.add(selABrightness);
+	selectiveGroup.add(selBHue);
+	selectiveGroup.add(selBRange);
+	selectiveGroup.add(selBFalloff);
+	selectiveGroup.add(selBSaturation);
+	selectiveGroup.add(selBHueShift);
+	selectiveGroup.add(selBBrightness);
+	selectivePanel.setup(selectiveGroup);
+
 	loadGradingParams();
 
 	// Mouth presentation: starts on its neutral pose, so the fixture grid is
@@ -176,8 +216,47 @@ bool ofApp::buildGradeShader(bool useRect) {
 		"uniform float uGamma;\n"
 		"uniform float uSaturation;\n"
 		"uniform vec3 uGain;\n"
+		// Selective color bands: xDef = (hue center, range, falloff) in
+		// degrees, xAdj = (saturation mul, hue shift deg, brightness mul).
+		"uniform vec3 uSelADef;\n"
+		"uniform vec3 uSelAAdj;\n"
+		"uniform vec3 uSelBDef;\n"
+		"uniform vec3 uSelBAdj;\n"
+		"uniform float uShowMask;\n"
 		"in vec2 vTexCoord;\n"
 		"out vec4 outColor;\n"
+		"vec3 rgb2hsv(vec3 c) {\n"
+		"    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);\n"
+		"    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));\n"
+		"    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));\n"
+		"    float d = q.x - min(q.w, q.y);\n"
+		"    float e = 1.0e-10;\n"
+		"    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);\n"
+		"}\n"
+		"vec3 hsv2rgb(vec3 c) {\n"
+		"    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);\n"
+		"    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);\n"
+		"    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);\n"
+		"}\n"
+		// Band weight: 1 inside range/2 of the hue center, smooth falloff
+		// outside, times a saturation ramp so near-gray/white pixels stay
+		// untouched (this is what keeps the whites white).
+		"float bandWeight(vec3 hsv, vec3 def) {\n"
+		"    float dist = abs(hsv.x - def.x / 360.0);\n"
+		"    dist = min(dist, 1.0 - dist);\n"
+		"    float inner = def.y * 0.5 / 360.0;\n"
+		"    float outer = inner + max(def.z / 360.0, 1.0e-4);\n"
+		"    float w = 1.0 - smoothstep(inner, outer, dist);\n"
+		"    w *= smoothstep(0.0, 0.25, hsv.y);\n"
+		"    return w;\n"
+		"}\n"
+		"vec3 applyBand(vec3 hsv, vec3 def, vec3 adj) {\n"
+		"    float w = bandWeight(hsv, def);\n"
+		"    hsv.x = fract(hsv.x + (adj.y / 360.0) * w + 1.0);\n"
+		"    hsv.y = clamp(hsv.y * mix(1.0, adj.x, w), 0.0, 1.0);\n"
+		"    hsv.z *= mix(1.0, adj.z, w);\n"
+		"    return hsv;\n"
+		"}\n"
 		"void main() {\n"
 		"    vec3 c = texture(tex0, vTexCoord).rgb;\n"
 		"    c *= exp2(uExposure);\n"
@@ -186,7 +265,16 @@ bool ofApp::buildGradeShader(bool useRect) {
 		"    c = pow(max(c, vec3(0.0)), vec3(1.0 / uGamma));\n"
 		"    float luma = dot(c, vec3(0.299, 0.587, 0.114));\n"
 		"    c = mix(vec3(luma), c, uSaturation);\n"
-		"    c *= uGain;\n" // per-channel RGB gain: hue/white-point shift
+		"    vec3 hsv = rgb2hsv(clamp(c, vec3(0.0), vec3(1.0)));\n"
+		"    if (uShowMask > 0.5) {\n" // tuning aid: combined band coverage
+		"        float m = max(bandWeight(hsv, uSelADef), bandWeight(hsv, uSelBDef));\n"
+		"        outColor = vec4(vec3(m), 1.0);\n"
+		"        return;\n"
+		"    }\n"
+		"    hsv = applyBand(hsv, uSelADef, uSelAAdj);\n"
+		"    hsv = applyBand(hsv, uSelBDef, uSelBAdj);\n"
+		"    c = hsv2rgb(hsv);\n"
+		"    c *= uGain;\n" // white-point trim LAST, like a calibration
 		"    c = clamp(c, vec3(0.0), vec3(1.0));\n"
 		"    outColor = vec4(c, 1.0);\n"
 		"}\n";
@@ -220,6 +308,11 @@ bool ofApp::loadGradingParams() {
 	try {
 		const ofJson json = ofLoadJson(path);
 		ofDeserialize(json, gradingGroup);
+		// Older grading.json files have no selective_color block; keep the
+		// current (neutral) values then.
+		if (json.contains(selectiveGroup.getName())) {
+			ofDeserialize(json, selectiveGroup);
+		}
 	} catch (const std::exception & e) {
 		ofLogError("omnivisu_receiver") << "failed to load grading.json: " << e.what();
 		return false;
@@ -233,6 +326,7 @@ bool ofApp::saveGradingParams() {
 	const auto path = ofToDataPath("grading.json", true);
 	ofJson json;
 	ofSerialize(json, gradingGroup);
+	ofSerialize(json, selectiveGroup);
 	if (!ofSavePrettyJson(path, json)) {
 		ofLogError("omnivisu_receiver") << "failed to save " << path;
 		return false;
@@ -274,6 +368,10 @@ void ofApp::reloadRuntimeConfig() {
 	if (config.getListenPort() != prevPort) {
 		ofLogNotice("omnivisu_receiver")
 			<< "listen_port changed in config.json - restart to apply";
+	}
+	if (std::abs(config.getUiScale() - uiScale) > 0.01f) {
+		ofLogNotice("omnivisu_receiver")
+			<< "ui_scale changed in config.json - restart to apply";
 	}
 
 	// Mouth presentation parameters (neutral_width, transition_seconds,
@@ -743,6 +841,15 @@ void ofApp::draw() {
 		gradeShader.setUniform1f("uSaturation", gradeSaturation.get());
 		gradeShader.setUniform3f("uGain",
 			gradeRed.get(), gradeGreen.get(), gradeBlue.get());
+		gradeShader.setUniform3f("uSelADef",
+			selAHue.get(), selARange.get(), selAFalloff.get());
+		gradeShader.setUniform3f("uSelAAdj",
+			selASaturation.get(), selAHueShift.get(), selABrightness.get());
+		gradeShader.setUniform3f("uSelBDef",
+			selBHue.get(), selBRange.get(), selBFalloff.get());
+		gradeShader.setUniform3f("uSelBAdj",
+			selBSaturation.get(), selBHueShift.get(), selBBrightness.get());
+		gradeShader.setUniform1f("uShowMask", selShowMask.get() ? 1.0f : 0.0f);
 		ledFbo.getTexture().draw(0, 0, ledW, ledH);
 		gradeShader.end();
 	} else {
@@ -759,11 +866,14 @@ void ofApp::draw() {
 	}
 
 	// ---- UI area ----
+	// Text rows and the fade meter scale with uiScale so they stay readable
+	// on a high-resolution screen; the text itself is drawn via drawUiText
+	// (TTF at UI size instead of the tiny fixed bitmap font).
 	const float pad = 8.0f;
 	const float bandH = static_cast<float>(config.getMouthBand());
 	const float stripY = ledH + pad;
-	const float textY = stripY + bandH + 24.0f; // status row baseline
-	const float noticeY = textY + 20.0f;        // notices row baseline
+	const float textY = stripY + bandH + 24.0f * uiScale; // status row baseline
+	const float noticeY = textY + 20.0f * uiScale;        // notices row baseline
 
 	// Mouth fixture grid: the receiver-side 18x5 RGB lights (eased live
 	// target or the neutral idle pose, occupying the 4th row) upscaled
@@ -813,13 +923,13 @@ void ofApp::draw() {
 
 		const float textX = pad;
 		ofSetColor(255);
-		ofDrawBitmapString(msg.str(), textX, textY);
+		drawUiText(msg.str(), textX, textY);
 
-		// Fade meter right of the text (bitmap glyphs are 8 px wide) showing
-		// the effective fade at a glance even with apply off.
-		const float meterX = textX + msg.str().size() * 8.0f + 16.0f;
-		const float meterW = 80.0f;
-		const float meterH = 10.0f;
+		// Fade meter right of the text showing the effective fade at a
+		// glance even with apply off.
+		const float meterX = textX + uiTextWidth(msg.str()) + 16.0f * uiScale;
+		const float meterW = 80.0f * uiScale;
+		const float meterH = 10.0f * uiScale;
 		const float meterY = textY - meterH + 1.0f;
 		ofPushStyle();
 		ofNoFill();
@@ -835,24 +945,46 @@ void ofApp::draw() {
 	// The LED area itself stays black either way.
 	if (mode == Mode::ArchiveWait) {
 		ofSetColor(255);
-		ofDrawBitmapString("waiting for stream on UDP port "
+		drawUiText("waiting for stream on UDP port "
 			+ ofToString(config.getListenPort())
 			+ " | next archive clip in "
 			+ ofToString(std::max(0.0f, archiveNextTime - ofGetElapsedTimef()), 0) + "s",
 			pad, noticeY);
 	} else if (mode == Mode::Idle && (!hasFrame || linkFade <= 0.0f)) {
 		ofSetColor(255);
-		ofDrawBitmapString("waiting for stream on UDP port "
+		drawUiText("waiting for stream on UDP port "
 			+ ofToString(config.getListenPort()), pad, noticeY);
 	}
 
-	// Grading panel: right side of the UI area, below the mouth grid. The
-	// position is clamped every frame so it can never sit inside the LED
-	// area regardless of window size or scale.
+	// Panels: grading on the right, selective color to its left, both below
+	// the text rows (the UI-scaled status line is wide, so the panels start
+	// under it instead of beside it). Positions are clamped every frame so
+	// they can never sit inside the LED area regardless of window size.
+	const float panelY = std::max(ledH + pad, noticeY + 10.0f * uiScale);
 	const float panelX = std::max(pad, ledW - gradingPanel.getWidth() - pad);
-	const float panelY = std::max(ledH + pad, stripY + bandH + pad);
 	gradingPanel.setPosition(panelX, panelY);
 	gradingPanel.draw();
+	const float selPanelX = std::max(pad,
+		panelX - selectivePanel.getWidth() - pad);
+	selectivePanel.setPosition(selPanelX, panelY);
+	selectivePanel.draw();
+}
+
+//--------------------------------------------------------------
+void ofApp::drawUiText(const std::string & text, float x, float y) {
+	if (uiFont.isLoaded()) {
+		uiFont.drawString(text, x, y);
+	} else {
+		ofDrawBitmapString(text, x, y);
+	}
+}
+
+//--------------------------------------------------------------
+float ofApp::uiTextWidth(const std::string & text) const {
+	if (uiFont.isLoaded()) {
+		return uiFont.stringWidth(text);
+	}
+	return static_cast<float>(text.size()) * 8.0f; // bitmap glyphs are 8 px
 }
 
 //--------------------------------------------------------------

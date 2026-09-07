@@ -36,6 +36,10 @@ public:
 	int getDisplay() const { return display; }
 	bool getVsync() const { return vsync; }
 	float getScale() const { return scale; }
+	/// Magnification of the operator UI (gui panels, status text, fade
+	/// meter) for high-resolution screens. Applied at startup only - the gui
+	/// fonts and panel geometry are built once.
+	float getUiScale() const { return uiScale; }
 	/// Initial state of applying the received fade to the rendered image
 	/// (toggled at runtime with 'a'). The fade value itself is always shown
 	/// in the info bar regardless.
@@ -135,6 +139,7 @@ private:
 	int display = 0;
 	bool vsync = true;
 	float scale = 1.0f;
+	float uiScale = 3.0f;
 	bool applyFade = true;
 	int mouthBand = 96;
 	float streamTimeoutSeconds = 1.0f;

@@ -50,6 +50,7 @@ bool ReceiverConfig::load(const std::string & path) {
 		display = r.value("display", display);
 		vsync = r.value("vsync", vsync);
 		scale = r.value("scale", scale);
+		uiScale = std::clamp(r.value("ui_scale", uiScale), 1.0f, 6.0f);
 		applyFade = r.value("apply_fade", applyFade);
 		mouthBand = r.value("mouth_band", mouthBand);
 		streamTimeoutSeconds = r.value("stream_timeout_seconds", streamTimeoutSeconds);
