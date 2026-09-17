@@ -22,7 +22,8 @@
         "immediate_playback": true,
         "permanent_storage": true,
         "min_free_gb": 50.0,
-        "min_duration_seconds": 8.0
+        "min_duration_seconds": 8.0,
+        "trim_end_seconds": 3.0
     },
     "archive_playback": {
         "enabled": false,

@@ -68,8 +68,14 @@ public:
 	float getMinFreeGb() const { return minFreeGb; }
 	/// Minimum video length (seconds) a recording must reach to be stored
 	/// permanently; shorter clips are discarded so they never show up in the
-	/// archive playback.
+	/// archive playback. Checked AFTER the end-trim below, i.e. against the
+	/// length that will actually be played/stored.
 	float getMinClipSeconds() const { return minClipSeconds; }
+	/// Seconds cut off the END of every finished recording before playback
+	/// and storage (the tail where the person already walked away and only
+	/// the fade-out remains). 0 disables trimming. If the trim exceeds the
+	/// recorded video, the clip is skipped entirely (no playback, no storage).
+	float getTrimEndSeconds() const { return trimEndSeconds; }
 
 	// --- automated playback from the permanent storage ---
 	enum class ArchiveOrder { LatestFirst, OldestFirst, Random };
@@ -151,6 +157,7 @@ private:
 	bool permanentStorage = false;
 	float minFreeGb = 10.0f;
 	float minClipSeconds = 5.0f;
+	float trimEndSeconds = 3.0f;
 	bool archiveEnabled = false;
 	ArchiveOrder archiveOrder = ArchiveOrder::LatestFirst;
 	float archivePauseSeconds = 8.0f;

@@ -124,10 +124,11 @@ std::uint64_t StreamRecorder::startRecording(const std::string & dirAbs) {
 }
 
 //--------------------------------------------------------------
-void StreamRecorder::finalizeRecording() {
+void StreamRecorder::finalizeRecording(double trimEndSeconds) {
 	accepting = false;
 	Item item;
 	item.type = ItemType::Finalize;
+	item.trimSeconds = std::max(0.0, trimEndSeconds);
 	enqueue(std::move(item), false);
 }
 
@@ -187,7 +188,7 @@ void StreamRecorder::threadedFunction() {
 			handleState(item);
 			break;
 		case ItemType::Finalize:
-			finalizeOpenRecording();
+			finalizeOpenRecording(item.trimSeconds);
 			break;
 		case ItemType::Resolve:
 			handleResolve(item);
@@ -198,8 +199,9 @@ void StreamRecorder::threadedFunction() {
 		case ItemType::Quit:
 			// Everything queued before the Quit has been written; make sure a
 			// recording that was never finalized (unexpected shutdown path)
-			// still gets its manifest.
-			finalizeOpenRecording();
+			// still gets its manifest. No trim on this safety path - the clip
+			// is preserved as-is for inspection.
+			finalizeOpenRecording(0.0);
 			return;
 		}
 	}
@@ -207,7 +209,7 @@ void StreamRecorder::threadedFunction() {
 
 //--------------------------------------------------------------
 void StreamRecorder::handleStart(const Item & item) {
-	finalizeOpenRecording(); // safety: never leave a recording without manifest
+	finalizeOpenRecording(0.0); // safety: never leave a recording without manifest
 
 	std::error_code ec;
 	fs::remove_all(item.dir, ec);
@@ -298,12 +300,20 @@ void StreamRecorder::handleState(const Item & item) {
 }
 
 //--------------------------------------------------------------
-void StreamRecorder::finalizeOpenRecording() {
+void StreamRecorder::finalizeOpenRecording(double trimSeconds) {
 	if (!recOpen) {
 		return;
 	}
 	if (timeline.is_open()) {
 		timeline.close();
+	}
+
+	// Cut the configured tail (the person walking away + fade-out) BEFORE the
+	// manifest/result, so playback, the min-duration storage gate, and the
+	// archive all see only the trimmed clip. Runs on this worker thread, so
+	// the render thread never pays for the file deletes/rewrite.
+	if (trimSeconds > 0.0 && recFrames > 0) {
+		trimRecordingTail(trimSeconds);
 	}
 
 	ofJson manifest;
@@ -312,6 +322,9 @@ void StreamRecorder::finalizeOpenRecording() {
 	manifest["duration_seconds"] = recLastT;
 	manifest["video_seconds"] = recLastFrameT;
 	manifest["payload_bytes"] = recBytes;
+	if (trimSeconds > 0.0) {
+		manifest["trimmed_end_seconds"] = trimSeconds;
+	}
 	ofSavePrettyJson(fs::path(recDir) / "manifest.json", manifest);
 
 	Result res;
@@ -334,6 +347,152 @@ void StreamRecorder::finalizeOpenRecording() {
 	ofLogNotice("StreamRecorder") << "recording finalized: " << recDir
 		<< " frames=" << recFrames
 		<< " duration=" << ofToString(recLastT, 2) << "s";
+}
+
+//--------------------------------------------------------------
+void StreamRecorder::trimRecordingTail(double trimSeconds) {
+	const double keepT = recLastFrameT - trimSeconds;
+	const fs::path dir(recDir);
+
+	if (keepT <= 0.0) {
+		// The trim swallows the whole video: finalize as an empty clip, so
+		// the main thread skips the playback and the resolve deletes the
+		// folder (its frameCount <= 0 path) - no playback, no storage.
+		ofLogNotice("StreamRecorder") << "end-trim " << ofToString(trimSeconds, 2)
+			<< "s >= recorded video " << ofToString(recLastFrameT, 2)
+			<< "s - clip skipped (no playback, no storage): " << recDir;
+		recFrames = 0;
+		recLastT = 0.0;
+		recLastFrameT = 0.0;
+		recBytes = 0;
+		return;
+	}
+
+	const fs::path timelinePath = dir / "timeline.jsonl";
+	std::ifstream in(timelinePath);
+	if (!in.is_open()) {
+		ofLogWarning("StreamRecorder") << "cannot open timeline for trimming in "
+			<< recDir << " - clip left untrimmed";
+		return;
+	}
+
+	// First pass: split the timeline at the cutoff. Kept events stay as they
+	// are; frame files past the cutoff are deleted; state events past the
+	// cutoff are collected - they hold the recorded fade-out (the person
+	// walking away), which is shifted forward by the trimmed amount below so
+	// the clip still ends on its own fade-out.
+	const int origFrames = recFrames;
+	const double origVideoT = recLastFrameT;
+	std::vector<ofJson> kept;
+	std::vector<ofJson> tailStates;
+	int keptFrames = 0;
+	double lastKeptFrameT = 0.0;
+	std::uint64_t removedBytes = 0;
+	std::string line;
+	while (std::getline(in, line)) {
+		if (line.empty()) {
+			continue;
+		}
+		ofJson j = ofJson::parse(line, nullptr, false);
+		if (j.is_discarded() || !j.is_object()) {
+			continue;
+		}
+		const double t = j.value("t", 0.0);
+		const bool isFrame = j.value("type", std::string()) == "frame";
+		if (t > keepT) {
+			if (isFrame) {
+				const std::string rel = j.value("file", std::string());
+				if (!rel.empty()) {
+					std::error_code ec;
+					const fs::path f = dir / rel;
+					const auto sz = fs::file_size(f, ec);
+					if (!ec) {
+						removedBytes += static_cast<std::uint64_t>(sz);
+					}
+					fs::remove(f, ec);
+				}
+			} else {
+				tailStates.push_back(std::move(j));
+			}
+			continue;
+		}
+		kept.push_back(std::move(j));
+		if (isFrame) {
+			++keptFrames;
+			lastKeptFrameT = std::max(lastKeptFrameT, t);
+		}
+	}
+	in.close();
+
+	// The recorder appends in arrival order (already time-ordered); a stable
+	// sort guards against any out-of-order writes, same as the player does.
+	std::stable_sort(tailStates.begin(), tailStates.end(),
+		[](const ofJson & a, const ofJson & b) {
+			return a.value("t", 0.0) < b.value("t", 0.0);
+		});
+
+	const fs::path tmpPath = dir / "timeline.jsonl.tmp";
+	std::ofstream out(tmpPath, std::ios::out | std::ios::trunc);
+	if (!out.is_open()) {
+		ofLogWarning("StreamRecorder") << "cannot write " << tmpPath.string()
+			<< " - clip left untrimmed";
+		return;
+	}
+
+	// Second pass: write the kept events, moving the cut-away fade envelope
+	// forward by trimSeconds. Kept states inside the final trim window get
+	// their FADE overridden by the shifted tail fade at their time (step-wise,
+	// matching playback semantics) while their mouth targets stay untouched,
+	// so the mouth keeps matching the visible video. Nothing before that
+	// window changes.
+	double lastKeptT = 0.0;
+	std::size_t tailIdx = 0;
+	float tailFade = -1.0f; // shifted tail fade at/before the current time
+	for (auto & j : kept) {
+		const double t = j.value("t", 0.0);
+		if (j.value("type", std::string()) == "state" && t > keepT - trimSeconds) {
+			while (tailIdx < tailStates.size()
+				&& tailStates[tailIdx].value("t", 0.0) - trimSeconds <= t) {
+				tailFade = tailStates[tailIdx].value("fade", 0.0f);
+				++tailIdx;
+			}
+			if (tailFade >= 0.0f) {
+				j["fade"] = tailFade;
+			}
+		}
+		out << j.dump() << "\n";
+		lastKeptT = std::max(lastKeptT, t);
+	}
+	// Tail states landing past the last kept frame are re-appended at their
+	// shifted times: the end of the fade-out plus the trailing fade-0 states,
+	// exactly like the tail of an untrimmed recording.
+	for (auto & j : tailStates) {
+		const double shiftedT = j.value("t", 0.0) - trimSeconds;
+		if (shiftedT <= keepT) {
+			continue; // already consumed as a fade override above
+		}
+		j["t"] = shiftedT;
+		out << j.dump() << "\n";
+		lastKeptT = std::max(lastKeptT, shiftedT);
+	}
+	out.close();
+
+	std::error_code ec;
+	fs::rename(tmpPath, timelinePath, ec);
+	if (ec) {
+		ofLogWarning("StreamRecorder") << "failed to replace trimmed timeline in "
+			<< recDir << ": " << ec.message();
+	}
+
+	recFrames = keptFrames;
+	recLastT = lastKeptT;
+	recLastFrameT = lastKeptFrameT;
+	recBytes = (removedBytes <= recBytes) ? recBytes - removedBytes : 0;
+
+	ofLogNotice("StreamRecorder") << "end-trim " << ofToString(trimSeconds, 2)
+		<< "s applied: video " << ofToString(origVideoT, 2) << "s -> "
+		<< ofToString(recLastFrameT, 2) << "s, frames " << origFrames
+		<< " -> " << keptFrames;
 }
 
 //--------------------------------------------------------------

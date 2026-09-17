@@ -484,7 +484,10 @@ void ofApp::update() {
 		ofLogNotice("omnivisu_receiver") << "camera stream started - recording to slot "
 			<< (recordSlot == 0 ? "a" : "b");
 	} else if (!videoPresent && recordingActive) {
-		recorder.finalizeRecording();
+		// The finalize (on the recorder's worker thread) cuts the configured
+		// tail off the clip - the part where the person already walked away -
+		// before it is played back or stored.
+		recorder.finalizeRecording(static_cast<double>(config.getTrimEndSeconds()));
 		recordingActive = false;
 		tempNeedsResolve = true;
 		ofLogNotice("omnivisu_receiver") << "camera stream ended - finalizing recording";
@@ -995,7 +998,7 @@ void ofApp::exit() {
 	receiver.close();
 	player.close();
 	if (recordingActive) {
-		recorder.finalizeRecording();
+		recorder.finalizeRecording(static_cast<double>(config.getTrimEndSeconds()));
 		recordingActive = false;
 		tempNeedsResolve = true;
 	}

@@ -65,8 +65,14 @@ public:
 	/// Starts a new recording into dirAbs (wiped and recreated). Returns the
 	/// recording id used to poll getResult after finalizeRecording().
 	std::uint64_t startRecording(const std::string & dirAbs);
-	/// Stops accepting data immediately and queues the manifest write.
-	void finalizeRecording();
+	/// Stops accepting data immediately and queues the manifest write. Before
+	/// the manifest, trimEndSeconds are cut off the END of the clip (frame
+	/// files deleted, timeline rewritten so mouth/fade states match the
+	/// shortened video); the fade-out recorded in the cut-away tail is moved
+	/// forward by the same amount, so the clip still ends on its own fade-out.
+	/// A clip whose whole video falls inside the trim is finalized with
+	/// frameCount 0, so it is neither played nor stored.
+	void finalizeRecording(double trimEndSeconds = 0.0);
 	/// Promotes (keepPermanent, with a free-space gate) or deletes the most
 	/// recently finalized recording. Empty recordings and clips whose video is
 	/// shorter than minClipSeconds are always deleted, so they never reach the
@@ -100,6 +106,7 @@ private:
 		bool keepPermanent = false;
 		double minFreeGb = 0.0;
 		double minClipSeconds = 0.0;
+		double trimSeconds = 0.0; ///< Finalize: seconds cut off the clip end.
 		std::uint64_t id = 0;
 	};
 
@@ -108,7 +115,17 @@ private:
 	void handleStart(const Item & item);
 	void handleFrame(Item & item);
 	void handleState(const Item & item);
-	void finalizeOpenRecording();
+	void finalizeOpenRecording(double trimSeconds);
+	/// Cuts trimSeconds off the end of the still-open recording: frame files
+	/// past the cutoff are deleted and timeline.jsonl is rewritten so the
+	/// mouth/fade states match the shortened video. The fade-out recorded in
+	/// the cut-away tail is shifted forward by trimSeconds: kept states in
+	/// the final trim window get the shifted tail FADE (mouth targets stay
+	/// untouched), and the tail's trailing states (fade reaching 0) are
+	/// re-appended at their shifted times, so the trimmed clip ends on the
+	/// recorded fade-out. Updates the rec* counters; when the trim swallows
+	/// the whole video, recFrames becomes 0.
+	void trimRecordingTail(double trimSeconds);
 	void handleResolve(const Item & item);
 	/// Free-space-gated move into parent/<name> (suffixing on collision);
 	/// falls back to copy+delete across volumes. Deletes src when the gate
