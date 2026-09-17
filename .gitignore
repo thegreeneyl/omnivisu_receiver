@@ -5,6 +5,17 @@ obj/
 bin/*
 !bin/data/
 
+# --- Machine-local runtime config (NEVER overwritten by git) ---
+# Each machine owns its config.json/grading.json; the repo ships the tracked
+# *.default.json versions, which update-from-git.sh copies into place on a
+# fresh checkout. Use backup-config.sh to push a machine's live values into
+# the tracked machine-config/<hostname>/ folder for backup.
+bin/data/config.json
+bin/data/grading.json
+
+# Recorded clips written by the app at runtime
+bin/data/recordings/
+
 # Common shared libs that get copied into bin/ at build time
 # (these come from the openFrameworks distribution, not from this repo)
 *.so

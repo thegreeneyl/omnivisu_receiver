@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Pull the latest omnivisu_receiver source from origin/main and rebuild.
 #
+# bin/data/config.json and bin/data/grading.json are machine-local (ignored
+# by git) and are NEVER touched by an update; only a missing file is
+# bootstrapped from its tracked *.default.json. Use backup-config.sh to push
+# this machine's live values to the repo for backup.
+#
 # Usage (from anywhere):
 #   /path/to/omnivisu_receiver/update-from-git.sh
 #   /path/to/omnivisu_receiver/update-from-git.sh --no-build
@@ -49,6 +54,15 @@ if [[ "$stashed" -eq 1 ]]; then
 fi
 
 echo "==> now at $(git log -1 --oneline)"
+
+# Machine-local config bootstrap: only create a MISSING file from its tracked
+# default - an existing file is this machine's own and is never overwritten.
+for name in config grading; do
+	if [[ ! -f "bin/data/${name}.json" && -f "bin/data/${name}.default.json" ]]; then
+		echo "==> bootstrapping bin/data/${name}.json from ${name}.default.json"
+		cp "bin/data/${name}.default.json" "bin/data/${name}.json"
+	fi
+done
 
 if [[ "$BUILD" -eq 1 ]]; then
 	echo "==> building Release"
